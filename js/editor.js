@@ -188,10 +188,10 @@ export async function flushSave() {
   const doc = serializeDoc();
   let thumb = '';
   try {
-    thumb = ed.canvas.toDataURL({
+    thumb = await renderArtboard(() => ed.canvas.toDataURL({
       left: 0, top: 0, width: ed.docW, height: ed.docH,
       format: 'jpeg', quality: 0.65, multiplier: 280 / ed.docW,
-    });
+    }));
   } catch {}
   await saveProject({ id: ed.id, name: ed.name, updatedAt: Date.now(), thumb }, doc);
 }
@@ -591,38 +591,72 @@ export function collectDocColors() {
 
 export const maxExportScale = () => Math.max(1, Math.floor(6000 / Math.max(ed.docW, ed.docH)));
 
-export async function exportPNG(scale) {
+// fabric's export multiplies the *current* zoom and reads left/top/width/height
+// as screen coordinates. render with an identity viewport so the crop box means
+// artboard pixels — otherwise the flyer comes out shrunk into a corner.
+async function renderArtboard(fn) {
   const canvas = ed.canvas;
-  canvas.discardActiveObject();
-  canvas.requestRenderAll();
-  try { await document.fonts.ready; } catch {}
-  const shadow = ed.bgRect.shadow;
-  ed.bgRect.set('shadow', null);
-  const url = canvas.toDataURL({
-    left: 0, top: 0, width: ed.docW, height: ed.docH, format: 'png', multiplier: scale,
-  });
-  ed.bgRect.set('shadow', shadow);
-  canvas.requestRenderAll();
-  download(url, `${slug()}-${ed.docW * scale}x${ed.docH * scale}.png`);
+  // note: no discardActiveObject here — autosave renders a thumbnail on every
+  // edit, and dropping the selection each time would fight the user. fabric
+  // sets skipControlsDrawing during export, so handles stay out of the output.
+  const vpt = [...canvas.viewportTransform];
+  const shadow = ed.bgRect ? ed.bgRect.shadow : null;
+  if (ed.bgRect) ed.bgRect.set('shadow', null);
+  canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+  try {
+    return await fn();
+  } finally {
+    canvas.setViewportTransform(vpt);
+    if (ed.bgRect) ed.bgRect.set('shadow', shadow);
+    canvas.requestRenderAll();
+  }
 }
 
-export function saveProjectFile() {
-  const blob = new Blob([JSON.stringify(serializeDoc())], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  download(url, `${slug()}.pasteup.json`);
-  setTimeout(() => URL.revokeObjectURL(url), 30000);
+// a Blob, not a data URL: a 2x story png is ~15MB of base64, which mobile
+// safari will not reliably hand to a download link
+export async function renderPNGBlob(scale) {
+  try { await document.fonts.ready; } catch {}
+  return renderArtboard(() => ed.canvas.toBlob({
+    left: 0, top: 0, width: ed.docW, height: ed.docH, format: 'png', multiplier: scale,
+  }));
+}
+
+export const exportFilename = scale => `${slug()}-${ed.docW * scale}x${ed.docH * scale}.png`;
+export const projectFilename = () => `${slug()}.pasteup.json`;
+export const projectBlob = () =>
+  new Blob([JSON.stringify(serializeDoc())], { type: 'application/json' });
+
+// the share sheet is the only route into Photos on iOS; fall back to a
+// download link everywhere else. must be called straight from a tap.
+export async function saveFile(blob, filename) {
+  const type = blob.type || 'application/octet-stream';
+  try {
+    const file = new File([blob], filename, { type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: filename });
+      return 'shared';
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return 'cancelled';
+    // any other share failure falls through to the download link
+  }
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return 'downloaded';
+  } catch {
+    return 'failed';
+  }
 }
 
 const slug = () => ed.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'flyer';
-
-function download(url, filename) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
 
 // swap an image's pixels (erase result); keeps transforms, one undo entry
 export async function swapImageSource(obj, dataURL) {

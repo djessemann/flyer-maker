@@ -22,6 +22,9 @@ svg{display:block;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:
 .val{color:var(--ink);letter-spacing:.02em}
 .spacer{flex:1}
 .hidden{display:none !important}
+/* file inputs stay in the layout but out of sight — display:none inputs can
+   refuse to open their picker on some mobile browsers */
+.offscreen{position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
 
 /* views sit at the bottom of the stack; sheets/overlay/toast are body-level above them */
 .view{position:fixed;inset:0;display:none;flex-direction:column;background:var(--workspace);z-index:1}
@@ -219,6 +222,12 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .lacts{display:flex;gap:0;flex-shrink:0}
 .lacts .icon-btn{width:38px;height:44px;color:var(--mut2)}
 .lacts .icon-btn.act-on{color:var(--ink)}
+
+/* ---------- export preview ---------- */
+.exp-prev{display:flex;align-items:center;justify-content:center;background:var(--workspace);
+  border-radius:2px;padding:14px;min-height:120px}
+.exp-prev img{max-width:100%;max-height:34dvh;display:block;
+  box-shadow:0 8px 30px rgba(0,0,0,.16),0 0 0 1px rgba(0,0,0,.07)}
 
 /* ---------- canvas presets ---------- */
 .preset{display:flex;align-items:center;gap:13px;padding:14px 4px;border-bottom:1px solid var(--workspace);

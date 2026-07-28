@@ -5,7 +5,8 @@ import {
   ed, fabric, PRESETS, layerName, markDirty,
   addText, addShape, addImageFromFile, replaceImage, resetImageSize,
   duplicateObject, deleteObject, reorder, setLocked, setVisible,
-  resizeDoc, setBg, collectDocColors, maxExportScale, exportPNG, saveProjectFile,
+  resizeDoc, setBg, collectDocColors, maxExportScale,
+  renderPNGBlob, exportFilename, projectBlob, projectFilename, saveFile,
 } from './editor.js';
 import {
   allFamilies, fontMeta, loadFont, loadByName, loadSpecimens,
@@ -1030,14 +1031,12 @@ export function sheetExport() {
         ed.exportScale = +b.dataset.s;
         refreshSheet();
       });
-      root.querySelector('[data-png]').addEventListener('click', async () => {
-        showToast('rendering your png…');
-        await exportPNG(Math.min(ed.exportScale, maxExportScale()));
-        closeSheet();
-      });
-      root.querySelector('[data-proj]').addEventListener('click', () => {
-        saveProjectFile();
-        closeSheet();
+      root.querySelector('[data-png]').addEventListener('click', makePNG);
+      root.querySelector('[data-proj]').addEventListener('click', async () => {
+        const r = await saveFile(projectBlob(), projectFilename());
+        if (r === 'downloaded') showToast('project file saved');
+        if (r === 'shared') closeSheet();
+        if (r === 'failed') showToast("couldn't save the project file");
       });
     };
     return { html, wire };
@@ -1045,4 +1044,49 @@ export function sheetExport() {
   const b = build();
   openSheet('export', b.html, b.wire, { push: false });
   stack[stack.length - 1].rebuild = build;
+}
+
+let previewURL = null;
+
+// render first, show it, then let a fresh tap do the saving — ios only opens
+// the share sheet from a real user gesture, and an await eats that permission
+async function makePNG() {
+  const scale = Math.min(ed.exportScale, maxExportScale());
+  const btn = bodyEl.querySelector('[data-png]');
+  if (btn) { btn.disabled = true; btn.textContent = 'rendering…'; }
+
+  let blob = null;
+  try { blob = await renderPNGBlob(scale); } catch {}
+  if (!blob) {
+    showToast("couldn't render the png — try a smaller size");
+    refreshSheet();
+    return;
+  }
+
+  if (previewURL) URL.revokeObjectURL(previewURL);
+  previewURL = URL.createObjectURL(blob);
+  const name = exportFilename(scale);
+  const size = blob.size > 1048576
+    ? (blob.size / 1048576).toFixed(1) + ' MB'
+    : Math.round(blob.size / 1024) + ' KB';
+
+  openSheet('your png', `
+    <div class="exp-prev"><img src="${previewURL}" alt="your flyer"></div>
+    <p class="lbl" style="text-align:center;margin:12px 0 16px">
+      ${ed.docW * scale} × ${ed.docH * scale} · ${size}
+    </p>
+    <button class="pill" style="width:100%;padding:15px 0" data-save>save image</button>
+    <p class="hint" style="font-size:11.5px;margin-top:12px;line-height:1.55">
+      on iphone and ipad this opens the share sheet — choose “save image” to put it
+      in your photos. you can also press and hold the picture above to save it.
+    </p>`,
+    root => {
+      root.querySelector('[data-save]').addEventListener('click', async () => {
+        const r = await saveFile(blob, name);
+        if (r === 'shared') { showToast('saved'); closeSheet(); }
+        if (r === 'downloaded') showToast('saved to your downloads');
+        if (r === 'failed') showToast('press and hold the picture to save it');
+      });
+    },
+    { tall: true });
 }
