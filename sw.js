@@ -1,5 +1,5 @@
 // offline: cache the app shell up front, runtime-cache cdn libs and any fonts used
-const VERSION = 'pasteup-v1';
+const VERSION = 'pasteup-v2';
 const SHELL = [
   './',
   './index.html',
