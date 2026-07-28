@@ -1,15 +1,27 @@
 # pasteup
 
-a flyer editor for the browser. upload photos, scrub out what doesn't belong, set type and simple shapes on top, export a png.
+a flyer editor for the browser. add photos, scrub out what doesn't belong, set type and simple shapes on top, export a png.
 
 **live: https://djessemann.github.io/flyer-maker/**
 
-- ipad safari first (landscape + portrait), phone usable, desktop works
+- phone-first and fully usable on one; scales up to ipad and desktop
 - vanilla js, es modules, zero build step — push to `main` deploys via pages
-- fabric.js v6 for the canvas, opencv.js (lazy, in a worker) for retouch, idb-keyval for autosave
+- fabric.js v6 for the canvas, idb-keyval for autosave. object removal is implemented in-repo, so it has nothing to download
 - no backend, no accounts. projects live in your browser; export/import `.pasteup.json` files to move them
 
-spec of record: [`docs/design-doc.md`](docs/design-doc.md) · visual target: [`docs/mock.html`](docs/mock.html)
+## how it works
+
+select a layer and the bar under the canvas becomes that layer's controls —
+tap `color`, `font`, `size` and you get one sheet doing one job. with nothing
+selected the bar is `text · photo · shape · layers · canvas`. select a photo
+and it leads with **erase object**: paint over what you want gone, tap erase,
+and Telea inpainting fills it back in from the surrounding pixels.
+
+## docs
+
+- [`docs/design-doc.md`](docs/design-doc.md) — what pasteup does (spec of record)
+- [`docs/ui-revision.md`](docs/ui-revision.md) — how the shipped ui differs from the doc, and why
+- [`TESTING.md`](TESTING.md) — what's verified, and what still needs a real device
 
 ## run locally
 
