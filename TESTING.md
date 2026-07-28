@@ -5,7 +5,7 @@ The browser items below are covered by an automated pass driven through a
 real targets rather than calling functions. Everything marked **hardware** still
 needs a real iPad/iPhone.
 
-## verified on a phone-sized touch viewport — 57 checks, all passing
+## verified on a phone-sized touch viewport — 68 checks, all passing
 
 **the interface**
 - [x] sheets receive taps (asserted via `elementFromPoint`) — the v1 regression
@@ -54,7 +54,15 @@ needs a real iPad/iPhone.
 - [x] photos: add, flip, rotate, replace, fit-to-canvas
 - [x] layers: select, rename, reorder up/down, visibility, lock, duplicate, delete
 - [x] canvas: 5 presets, custom w/h, swap orientation
-- [x] export: 1x/2x/3x with live dimensions, png actually downloads, project file
+- [x] export renders a **preview you can see** before saving, then saves on a
+      fresh tap (iOS only opens the share sheet from a real gesture)
+- [x] the png is a Blob, not a data URL — a 2x story png is ~15MB of base64
+- [x] **the exported pixels are the flyer**: red/blue half-and-half test doc comes
+      back red corner-to-corner on the left, blue on the right, no blank margin
+- [x] exporting never drops your selection, and no handles are baked into the png
+- [x] home-screen thumbnails show the whole flyer (same crop bug)
+- [x] saved file carries a real png signature on disk
+- [x] project file saves; the photo picker actually opens
 - [x] autosave → reload → project listed → reopen with every layer intact
 - [x] undo / redo, keyboard shortcuts, arrow-key nudge
 - [x] no page errors across the whole run
@@ -66,7 +74,8 @@ needs a real iPad/iPhone.
       drag when a second finger lands
 - [ ] software keyboard doesn't cover the textbox while editing type
 - [ ] canvas memory: 3–4 large photos on a 1275×1650 doc without Safari reloading the tab
-- [ ] export share-sheet flow for png and `.pasteup.json`
+- [ ] share sheet actually offers “save image” into Photos, for png and `.pasteup.json`
+- [ ] press-and-hold on the export preview offers Save Image
 - [ ] add-to-home-screen: icon, standalone chrome, safe-area insets under the action bar
 - [ ] offline relaunch after a first visit, including previously used google fonts
 - [ ] erase brush feel with finger and Apple Pencil; inpaint time on a large photo

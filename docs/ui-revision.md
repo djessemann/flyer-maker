@@ -153,3 +153,52 @@ Contrast measured 6.96:1 against a 4.5:1 requirement; targets are 60×64px in th
 bar and 44px on canvas handles; chrome takes 15% of the screen with the artboard
 filling 87% of what's left. The contextual-bar concept and the contents of the
 colour and font sheets were right in v2 — the problem was where they appeared.
+
+---
+
+# export fixes
+
+Reported from a phone: download and viewing the image didn't work. Three causes,
+all in the same path.
+
+## 1. the exported pixels were wrong
+
+`StaticCanvas.toCanvasElement(multiplier, {left, top, width, height})` computes
+its render zoom as **`currentZoom × multiplier`** and treats the crop box as
+**screen** coordinates. The export passed *scene* coordinates (`0,0,docW,docH`)
+while the canvas sat at fit zoom (~0.34), so every png came out the right size
+with the flyer shrunk into the top-left corner and the rest blank.
+
+Exports now run with an identity viewport, so the crop box means artboard pixels.
+Autosave thumbnails had the identical bug and are fixed by the same helper.
+
+**This shipped broken from v1.** Every export test asserted output *dimensions*,
+which were always correct — the crop error changed content, not size. There is now
+a pixel assertion: a half-red/half-blue document must come back red corner-to-corner
+on the left and blue on the right, with no blank margin.
+
+## 2. the download couldn't work on iOS
+
+The png was built as a data URL and handed to `<a download>`. A 2x story export is
+~15 MB of base64, and iOS Safari does not reliably honour `download` on data URLs
+at any size.
+
+Now: `canvas.toBlob()` (no base64 round trip) and a `saveFile()` helper that tries
+`navigator.share({files})` first — the only route into Photos on iOS — and falls
+back to an object-URL download link elsewhere.
+
+## 3. you couldn't see the result
+
+Export fired and closed the sheet, so a failure was indistinguishable from success.
+Export now renders, shows the png at full size in a preview, and saves on a second,
+deliberate tap. That also fixes a subtler iOS constraint: `navigator.share` needs a
+real user gesture, and the `await` around rendering spends the original one.
+
+## also
+
+- File inputs moved from `display:none` to off-screen positioning; some mobile
+  browsers refuse to open a picker for a `display:none` input.
+- `renderArtboard` deliberately does **not** discard the selection — autosave
+  renders a thumbnail on every edit, and discarding would deselect the user's
+  layer roughly once a second. Fabric sets `skipControlsDrawing` during export,
+  so handles stay out of the output regardless; asserted by test.
