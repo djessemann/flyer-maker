@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>pasteup — mock v1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Archivo+Black&family=Anton&family=Bebas+Neue&family=Fraunces&family=Space+Mono&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F8F7F4; --workspace:#E8E6E0; --ink:#111110;
+    --mut1:#555; --mut2:#999; --danger:#cc3333; --sel:rgba(0,0,0,0.3);
+    --mono:'DM Mono','Courier New',monospace;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:var(--workspace)}
+  body{font-family:var(--mono);color:var(--ink);-webkit-font-smoothing:antialiased;font-size:14px}
+  button{font-family:var(--mono);background:none;border:none;color:inherit;font-size:inherit;cursor:pointer}
+  button:active{opacity:.3}
+  svg{display:block;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:square}
+  .lbl{font-size:11px;letter-spacing:.06em;color:var(--mut2)}
+  .hint{font-style:italic;font-weight:300;color:var(--mut2)}
+
+  /* ---------- top bar ---------- */
+  .topbar{height:52px;background:var(--paper);border-bottom:1px solid var(--workspace);
+    display:flex;align-items:center;gap:16px;padding:0 14px;flex-shrink:0}
+  .topbar .back{display:flex;align-items:center;gap:6px;font-size:13px;letter-spacing:.03em;color:var(--mut1)}
+  .doc-title{font-size:15px;letter-spacing:.02em}
+  .spacer{flex:1}
+  .icon-btn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;color:var(--ink)}
+  .icon-btn.dim{color:var(--mut2)}
+  .zoom{font-size:13px;color:var(--mut1);letter-spacing:.03em;padding:0 6px}
+  .pill{background:var(--ink);color:var(--paper);border-radius:20px;padding:9px 18px;
+    font-size:13px;letter-spacing:.04em}
+  .pill.ghost{background:none;color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+  .vdiv{width:1px;height:22px;background:var(--workspace)}
+
+  /* ---------- ipad layout ---------- */
+  #ipadWrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  #ipad{width:1194px;height:834px;flex-shrink:0;display:flex;flex-direction:column;
+    background:var(--workspace);border-radius:18px;overflow:hidden;
+    box-shadow:0 24px 80px rgba(0,0,0,.20),0 0 0 1px rgba(0,0,0,.08)}
+  .body-row{flex:1;display:flex;min-height:0;position:relative}
+  .rail{width:60px;background:var(--paper);border-right:1px solid var(--workspace);
+    display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:4px;flex-shrink:0}
+  .tool{width:44px;height:44px;border-radius:2px;display:flex;align-items:center;justify-content:center;color:var(--mut1)}
+  .tool.on{background:var(--ink);color:var(--paper)}
+  .rail .push{flex:1}
+  .workspace{flex:1;position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+
+  /* ---------- artboard / flyer ---------- */
+  .artboard{width:420px;container-type:inline-size;aspect-ratio:4/5;background:#fff;position:relative;
+    box-shadow:0 18px 60px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06)}
+  .photo{position:absolute;inset:0 0 38% 0;overflow:hidden;
+    background:linear-gradient(155deg,#22423B 0%,#3A6156 34%,#C97A35 78%,#E8A45C 100%)}
+  .photo::before,.photo::after{content:"";position:absolute;border-radius:50%}
+  .photo::before{width:52%;aspect-ratio:1;left:-12%;bottom:-18%;background:rgba(255,255,255,.14)}
+  .photo::after{width:30%;aspect-ratio:1;right:8%;top:12%;background:rgba(17,17,16,.22)}
+  .chip{position:absolute;left:7%;top:56.5%;background:var(--ink);color:var(--paper);
+    border-radius:20px;padding:2.4% 4.2%;font-size:3.1cqw;letter-spacing:.05em}
+  .headline{position:absolute;left:6.5%;right:6%;top:66%;
+    font-family:'Archivo Black',var(--mono);font-size:10.4cqw;line-height:.95;
+    letter-spacing:-.01em;color:var(--ink)}
+  .subline{position:absolute;left:7%;bottom:5.5%;font-size:2.9cqw;
+    letter-spacing:.04em;color:var(--mut1)}
+
+  /* selection treatment — monochrome ink, paper-filled square handles */
+  .selbox{position:absolute;left:4.8%;right:4.2%;top:64.2%;height:24.5%;
+    outline:1.5px solid var(--ink);pointer-events:none}
+  .h{position:absolute;width:10px;height:10px;background:var(--paper);
+    outline:1.5px solid var(--ink);transform:translate(-50%,-50%)}
+  .h.tl{left:0;top:0}.h.tm{left:50%;top:0}.h.tr{left:100%;top:0}
+  .h.ml{left:0;top:50%}.h.mr{left:100%;top:50%}
+  .h.bl{left:0;top:100%}.h.bm{left:50%;top:100%}.h.br{left:100%;top:100%}
+  .rot{position:absolute;left:50%;top:100%;width:1.5px;height:22px;background:var(--ink)}
+  .rot::after{content:"";position:absolute;left:50%;top:22px;width:10px;height:10px;border-radius:50%;
+    background:var(--paper);outline:1.5px solid var(--ink);transform:translate(-50%,0)}
+
+  /* ---------- right panel ---------- */
+  .panel{width:300px;background:var(--paper);border-left:1px solid var(--workspace);
+    display:flex;flex-direction:column;flex-shrink:0}
+  .tabs{display:flex;border-bottom:1px solid var(--workspace)}
+  .tab{flex:1;padding:15px 0 13px;font-size:13px;letter-spacing:.05em;color:var(--mut2);
+    border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tab.on{color:var(--ink);border-bottom-color:var(--ink)}
+  .tabpane{flex:1;overflow-y:auto;display:none;padding:18px 18px 26px}
+  .tabpane.on{display:block}
+  .group{margin-bottom:22px}
+  .group .lbl{display:flex;justify-content:space-between;margin-bottom:9px}
+  .val{color:var(--ink);letter-spacing:.02em}
+
+  /* controls */
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:24px;background:none}
+  input[type=range]::-webkit-slider-runnable-track{height:2px;background:var(--workspace)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+    background:var(--ink);margin-top:-6px}
+  .seg{display:flex;box-shadow:inset 0 0 0 1px var(--workspace);border-radius:2px;overflow:hidden}
+  .seg button{flex:1;padding:10px 0;font-size:12.5px;letter-spacing:.03em;color:var(--mut1)}
+  .seg button.on{background:var(--ink);color:var(--paper)}
+  .stepper{display:flex;align-items:center;box-shadow:inset 0 0 0 1px var(--workspace);border-radius:2px}
+  .stepper button{width:42px;padding:10px 0;font-size:15px}
+  .stepper .num{flex:1;text-align:center;font-size:14px}
+  .field{display:flex;align-items:center;justify-content:space-between;padding:11px 12px;
+    box-shadow:inset 0 0 0 1px var(--workspace);border-radius:2px;font-size:13.5px}
+  .field .cara{color:var(--mut2)}
+  .swatches{display:flex;gap:9px;align-items:center}
+  .sw{width:26px;height:26px;border-radius:2px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.14)}
+  .sw.cur{outline:1.5px solid var(--ink);outline-offset:2px}
+  .sw.add{display:flex;align-items:center;justify-content:center;color:var(--mut2);
+    box-shadow:inset 0 0 0 1px var(--workspace);font-size:15px}
+
+  /* layers */
+  .sel-actions{display:flex;gap:6px;margin-bottom:6px}
+  .sel-actions .icon-btn{width:38px;height:38px;color:var(--mut1)}
+  .sel-actions .icon-btn.del{color:var(--danger)}
+  .lrow{display:flex;align-items:center;gap:11px;padding:9px 8px;border-radius:2px;position:relative}
+  .lrow:active{opacity:.4}
+  .lrow.on{background:var(--workspace)}
+  .lrow.on::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--ink)}
+  .thumb{width:30px;height:30px;border-radius:2px;flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(0,0,0,.10);
+    display:flex;align-items:center;justify-content:center;font-size:11px;background:#fff}
+  .lname{flex:1;font-size:13px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lmeta{display:flex;gap:2px;color:var(--mut2)}
+  .lmeta svg{opacity:.55}
+  .lrow .glyph{font-size:11px;color:var(--mut2);width:12px;text-align:center}
+
+  /* canvas tab */
+  .preset{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--workspace);font-size:13.5px}
+  .radio{width:12px;height:12px;box-shadow:inset 0 0 0 1.5px var(--mut2);border-radius:1px;flex-shrink:0}
+  .preset.on .radio{background:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
+  .preset .dim{margin-left:auto;color:var(--mut2);font-size:12px}
+  .wh{display:flex;gap:10px;margin-top:12px}
+  .wh .field{flex:1;color:var(--mut2)}
+  .export-block{border-top:1px solid var(--workspace);margin-top:8px;padding-top:20px;display:flex;flex-direction:column;gap:12px}
+
+  /* ---------- popovers (open menu states) ---------- */
+  .pop{position:absolute;z-index:40;background:var(--paper);border-radius:10px;display:none;
+    box-shadow:0 18px 60px rgba(0,0,0,.20),0 0 0 1px rgba(0,0,0,.07)}
+  .pop.open{display:flex;flex-direction:column}
+  .pop-head{padding:13px 16px 11px;border-bottom:1px solid var(--workspace);
+    font-size:12px;letter-spacing:.06em;color:var(--mut1)}
+  .fp{right:312px;top:56px;width:296px;max-height:calc(100% - 112px)}
+  .fp-search{margin:12px 14px 0;padding:10px 12px;box-shadow:inset 0 0 0 1px var(--workspace);
+    border-radius:2px;font-size:13px}
+  .fp-chips{display:flex;gap:6px;padding:10px 14px;flex-wrap:wrap}
+  .chip2{border-radius:20px;padding:6px 11px;font-size:11.5px;letter-spacing:.04em;
+    color:var(--mut1);box-shadow:inset 0 0 0 1px var(--workspace)}
+  .chip2.on{background:var(--ink);color:var(--paper);box-shadow:none}
+  .fp-list{flex:1;overflow-y:auto;padding:2px 6px;min-height:0}
+  .frow{display:flex;align-items:center;justify-content:space-between;padding:11px 10px;
+    font-size:16px;border-radius:2px}
+  .frow:active{opacity:.4}
+  .frow span{font-family:var(--mono);font-size:12px}
+  .fp-load{margin:6px 14px 14px;padding:10px 12px;box-shadow:inset 0 0 0 1px var(--workspace);
+    border-radius:2px;font-size:12.5px}
+  .cp{right:312px;top:132px;width:280px}
+  .cp-body{padding:14px;display:flex;flex-direction:column;gap:12px}
+  .cp-sq{height:140px;border-radius:2px;position:relative;
+    background:linear-gradient(to top,#000,rgba(0,0,0,0)),linear-gradient(to right,#fff,#C97A35)}
+  .cp-dot{position:absolute;right:26%;top:30%;width:12px;height:12px;border-radius:50%;
+    box-shadow:0 0 0 1.5px #fff,0 0 0 2.5px rgba(0,0,0,.35)}
+  .cp-hue{height:12px;border-radius:6px;position:relative;
+    background:linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+  .cp-mark{position:absolute;left:7%;top:50%;width:14px;height:14px;border-radius:50%;
+    transform:translate(-50%,-50%);background:#C97A35;box-shadow:0 0 0 2px #fff,0 0 0 3px rgba(0,0,0,.25)}
+  .cp-row{display:flex;gap:10px;align-items:center}
+  .sp{left:70px;top:118px;width:190px;padding:6px}
+  .srow{display:flex;align-items:center;gap:12px;padding:11px 12px;font-size:13.5px;border-radius:2px}
+  .srow:active{opacity:.4}
+  .srow svg{color:var(--mut1)}
+
+  /* ---------- floating mock switcher ---------- */
+  .mockbar{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:60;
+    background:var(--ink);color:var(--paper);border-radius:20px;display:flex;align-items:center;
+    gap:2px;padding:5px 6px 5px 14px;font-size:12px;letter-spacing:.05em;
+    box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .mockbar .tag{color:rgba(248,247,244,.55);margin-right:8px}
+  .mockbar button{padding:7px 13px;border-radius:14px;color:rgba(248,247,244,.6);font-size:12px;letter-spacing:.05em}
+  .mockbar button.on{background:var(--paper);color:var(--ink)}
+
+  /* ---------- phone view ---------- */
+  #phone{display:none;height:100%;align-items:center;justify-content:center}
+  .frame{width:100%;height:100%;background:var(--paper);
+    overflow:hidden;position:relative;display:flex;flex-direction:column}
+  @media (min-width:500px){
+    .frame{width:393px;height:min(800px,calc(100vh - 110px));border-radius:47px;
+      box-shadow:0 32px 100px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.08)}
+  }
+  @media (max-width:499px){.mockbar{bottom:78px}}
+  .frame .topbar{height:58px;padding:8px 10px 0}
+  .frame .doc-title{font-size:14px}
+  .frame .workspace{background:var(--workspace)}
+  .frame .artboard{width:min(64%,250px)}
+  .toolbar{height:60px;background:var(--paper);border-top:1px solid var(--workspace);
+    display:flex;align-items:center;justify-content:space-evenly;padding:0 8px 4px;flex-shrink:0}
+  .layers-pill{display:flex;align-items:center;gap:7px;box-shadow:inset 0 0 0 1px var(--workspace);
+    border-radius:20px;padding:9px 14px;font-size:12px;letter-spacing:.04em;color:var(--mut1)}
+  .overlay{position:absolute;inset:0;background:var(--sel);opacity:0;pointer-events:none;transition:opacity .16s ease;z-index:5}
+  .frame.sheet-open .overlay{opacity:1;pointer-events:auto}
+  .sheet{position:absolute;left:0;right:0;bottom:0;height:62%;background:var(--paper);
+    border-radius:20px 20px 0 0;z-index:6;transform:translateY(110%);
+    transition:transform .28s cubic-bezier(.32,1.1,.58,1);display:flex;flex-direction:column}
+  .frame.sheet-open .sheet{transform:translateY(0)}
+  .sheet-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 10px}
+  .sheet-head .t{font-size:14px;letter-spacing:.03em}
+  .sheet .tabs{padding:0 8px}
+  .sheet-body{flex:1;overflow-y:auto;padding:16px 18px}
+  .grab{width:36px;height:4px;border-radius:2px;background:var(--workspace);margin:8px auto 0}
+
+  @media (prefers-reduced-motion:reduce){.sheet,.overlay{transition:none}}
+</style>
+</head>
+<body>
+
+<!-- ============ IPAD (primary) ============ -->
+<div id="ipadWrap">
+<div id="ipad">
+  <div class="topbar">
+    <button class="back"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M9 2 L4 7 L9 12"/></svg>projects</button>
+    <div class="vdiv"></div>
+    <div class="doc-title">untitled flyer</div>
+    <div class="spacer"></div>
+    <button class="icon-btn" title="undo"><svg width="17" height="17" viewBox="0 0 17 17"><path d="M6 3 L2.5 6.5 L6 10"/><path d="M2.5 6.5 H10 a4 4 0 0 1 4 4 v3"/></svg></button>
+    <button class="icon-btn dim" title="redo"><svg width="17" height="17" viewBox="0 0 17 17"><path d="M11 3 L14.5 6.5 L11 10"/><path d="M14.5 6.5 H7 a4 4 0 0 0 -4 4 v3"/></svg></button>
+    <div class="vdiv"></div>
+    <button class="zoom">100%</button>
+    <button class="pill">export</button>
+  </div>
+
+  <div class="body-row">
+    <!-- popovers: open states of the font picker, color picker, shape menu -->
+    <div class="pop fp" id="popFont">
+      <div class="pop-head">font</div>
+      <div class="fp-search hint">search google fonts…</div>
+      <div class="fp-chips"><button class="chip2 on">all</button><button class="chip2">display</button><button class="chip2">serif</button><button class="chip2">sans</button><button class="chip2">mono</button></div>
+      <div class="fp-list">
+        <div class="frow" style="font-family:'Anton'">Anton</div>
+        <div class="frow" style="font-family:'Archivo Black'">Archivo Black<span>✓</span></div>
+        <div class="frow" style="font-family:'Bebas Neue'">Bebas Neue</div>
+        <div class="frow" style="font-family:'DM Mono'">DM Mono</div>
+        <div class="frow" style="font-family:'Fraunces'">Fraunces</div>
+        <div class="frow" style="font-family:'Space Mono'">Space Mono</div>
+      </div>
+      <div class="fp-load hint">load any google font by name…</div>
+    </div>
+
+    <div class="pop cp" id="popColor">
+      <div class="pop-head">fill</div>
+      <div class="cp-body">
+        <div class="cp-sq"><span class="cp-dot"></span></div>
+        <div class="cp-hue"><span class="cp-mark"></span></div>
+        <div class="cp-row">
+          <div class="sw" style="background:#111110"></div>
+          <div class="field" style="flex:1">hex<span class="val">#111110</span></div>
+        </div>
+        <div class="swatches" style="flex-wrap:wrap">
+          <div class="sw" style="background:#111110"></div><div class="sw" style="background:#555555"></div><div class="sw" style="background:#999999"></div><div class="sw" style="background:#d9d7d1"></div><div class="sw" style="background:#E8E6E0"></div><div class="sw" style="background:#F8F7F4"></div><div class="sw" style="background:#ffffff"></div><div class="sw" style="background:#22423B"></div><div class="sw" style="background:#C97A35"></div><div class="sw" style="background:#cc3333"></div>
+        </div>
+        <button class="pill ghost" style="width:100%;padding:10px 0;font-size:12.5px">sample from canvas</button>
+      </div>
+    </div>
+
+    <div class="pop sp" id="popShape">
+      <div class="srow"><svg width="16" height="16" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9"/></svg>rectangle</div>
+      <div class="srow"><svg width="16" height="16" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" rx="3"/></svg>rounded</div>
+      <div class="srow"><svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/></svg>ellipse</div>
+      <div class="srow"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 13 L13 3"/></svg>line</div>
+    </div>
+
+    <!-- tool rail -->
+    <div class="rail">
+      <button class="tool on" data-tool title="move"><svg width="18" height="18" viewBox="0 0 18 18"><path d="M4 2.5 L13.5 9 L8.8 9.8 L11.2 14.6 L9.2 15.6 L6.8 10.8 L4 13.5 Z"/></svg></button>
+      <button class="tool" data-tool title="text" style="font-size:16px;font-weight:500">T</button>
+      <button class="tool" id="toolShape" data-tool title="shape"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="3" y="3" width="12" height="12"/></svg></button>
+      <button class="tool" data-tool title="image"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="2.5" y="3.5" width="13" height="11"/><circle cx="6.5" cy="7" r="1.4"/><path d="M4 13 L8.5 9 L11 11.5 L13 9.5 L15 11.5"/></svg></button>
+      <button class="tool" data-tool title="retouch"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="6.6" y="1.6" width="6" height="10" rx="1" transform="rotate(45 9 9)"/><path d="M4.5 10.5 L8 14"/><path d="M2.5 15.5 H9"/></svg></button>
+      <div class="push"></div>
+      <button class="tool" title="canvas settings"><svg width="18" height="18" viewBox="0 0 18 18"><path d="M2.5 5 H15.5 M2.5 9 H15.5 M2.5 13 H15.5"/><circle cx="6.5" cy="5" r="1.6" fill="var(--paper)"/><circle cx="12" cy="9" r="1.6" fill="var(--paper)"/><circle cx="8" cy="13" r="1.6" fill="var(--paper)"/></svg></button>
+    </div>
+
+    <!-- canvas -->
+    <div class="workspace">
+      <div class="artboard">
+        <div class="photo"></div>
+        <div class="chip">sat aug 15 · 2–8pm</div>
+        <div class="headline">BLOCK<br>PARTY</div>
+        <div class="subline">fort greene park · free · all ages</div>
+        <div class="selbox">
+          <span class="h tl"></span><span class="h tm"></span><span class="h tr"></span>
+          <span class="h ml"></span><span class="h mr"></span>
+          <span class="h bl"></span><span class="h bm"></span><span class="h br"></span>
+          <span class="rot"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- right panel -->
+    <div class="panel">
+      <div class="tabs" id="ipadTabs">
+        <button class="tab" data-pane="pane-layers">layers</button>
+        <button class="tab on" data-pane="pane-style">style</button>
+        <button class="tab" data-pane="pane-canvas">canvas</button>
+      </div>
+
+      <!-- layers -->
+      <div class="tabpane" id="pane-layers">
+        <div class="group">
+          <div class="lbl"><span>opacity</span><span class="val">100</span></div>
+          <input type="range" min="0" max="100" value="100" data-out="prev">
+          <div class="sel-actions">
+            <button class="icon-btn" title="duplicate"><svg width="16" height="16" viewBox="0 0 16 16"><rect x="5" y="5" width="9" height="9"/><path d="M11 2 H2 V11"/></svg></button>
+            <button class="icon-btn" title="bring forward"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 13 V3 M4 7 L8 3 L12 7"/></svg></button>
+            <button class="icon-btn" title="send backward"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 3 V13 M4 9 L8 13 L12 9"/></svg></button>
+            <div class="spacer"></div>
+            <button class="icon-btn del" title="delete"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 4.5 H13 M6.5 4.5 V3 H9.5 V4.5 M4.5 4.5 L5.2 13.5 H10.8 L11.5 4.5"/></svg></button>
+          </div>
+        </div>
+        <div class="lbl" style="margin-bottom:6px">5 layers</div>
+        <div id="layerList">
+          <div class="lrow on"><span class="glyph">T</span><div class="thumb" style="font-family:'Archivo Black'">B</div><div class="lname">block party</div><div class="lmeta"><svg width="15" height="15" viewBox="0 0 15 15"><path d="M1.5 7.5 C3.5 4.5 5.5 3 7.5 3 s4 1.5 6 4.5 c-2 3-4 4.5-6 4.5 s-4-1.5-6-4.5 Z"/><circle cx="7.5" cy="7.5" r="1.6"/></svg></div></div>
+          <div class="lrow"><span class="glyph">T</span><div class="thumb" style="font-size:8px;color:var(--mut1)">ab</div><div class="lname">fort greene park · free…</div><div class="lmeta"><svg width="15" height="15" viewBox="0 0 15 15"><path d="M1.5 7.5 C3.5 4.5 5.5 3 7.5 3 s4 1.5 6 4.5 c-2 3-4 4.5-6 4.5 s-4-1.5-6-4.5 Z"/><circle cx="7.5" cy="7.5" r="1.6"/></svg></div></div>
+          <div class="lrow"><span class="glyph">▢</span><div class="thumb" style="background:var(--ink)"></div><div class="lname">date chip</div><div class="lmeta"><svg width="15" height="15" viewBox="0 0 15 15"><path d="M1.5 7.5 C3.5 4.5 5.5 3 7.5 3 s4 1.5 6 4.5 c-2 3-4 4.5-6 4.5 s-4-1.5-6-4.5 Z"/><circle cx="7.5" cy="7.5" r="1.6"/></svg></div></div>
+          <div class="lrow"><span class="glyph">▣</span><div class="thumb" style="background:linear-gradient(150deg,#22423B,#C97A35)"></div><div class="lname">photo 1</div><div class="lmeta"><svg width="15" height="15" viewBox="0 0 15 15"><path d="M1.5 7.5 C3.5 4.5 5.5 3 7.5 3 s4 1.5 6 4.5 c-2 3-4 4.5-6 4.5 s-4-1.5-6-4.5 Z"/><circle cx="7.5" cy="7.5" r="1.6"/></svg></div></div>
+          <div class="lrow"><span class="glyph">□</span><div class="thumb"></div><div class="lname">background</div><div class="lmeta"><svg width="15" height="15" viewBox="0 0 15 15"><rect x="3.5" y="6.5" width="8" height="6"/><path d="M5 6.5 V4.5 a2.5 2.5 0 0 1 5 0 V6.5"/></svg></div></div>
+        </div>
+      </div>
+
+      <!-- style (text selected) -->
+      <div class="tabpane on" id="pane-style">
+        <div class="group">
+          <div class="lbl"><span>font</span></div>
+          <button class="field" id="fontField" style="width:100%;font-family:'Archivo Black'">Archivo Black<span class="cara">▾</span></button>
+        </div>
+        <div class="group">
+          <div class="lbl"><span>size</span></div>
+          <div class="stepper"><button>–</button><div class="num">128</div><button>+</button></div>
+        </div>
+        <div class="group">
+          <div class="lbl"><span>weight · style</span></div>
+          <div class="seg" data-seg><button>300</button><button>400</button><button class="on">black</button><button style="font-style:italic">i</button></div>
+        </div>
+        <div class="group">
+          <div class="lbl"><span>fill</span></div>
+          <div class="swatches" id="fillSwatches">
+            <div class="sw cur" style="background:#111110"></div>
+            <div class="sw" style="background:#F8F7F4"></div>
+            <div class="sw" style="background:#22423B"></div>
+            <div class="sw" style="background:#C97A35"></div>
+            <div class="sw" style="background:#cc3333"></div>
+            <button class="sw add">+</button>
+          </div>
+        </div>
+        <div class="group">
+          <div class="lbl"><span>align</span></div>
+          <div class="seg" data-seg>
+            <button class="on"><svg width="15" height="15" viewBox="0 0 15 15" style="margin:0 auto"><path d="M2 3.5 H13 M2 7.5 H9 M2 11.5 H11"/></svg></button>
+            <button><svg width="15" height="15" viewBox="0 0 15 15" style="margin:0 auto"><path d="M2 3.5 H13 M4 7.5 H11 M3 11.5 H12"/></svg></button>
+            <button><svg width="15" height="15" viewBox="0 0 15 15" style="margin:0 auto"><path d="M2 3.5 H13 M6 7.5 H13 M4 11.5 H13"/></svg></button>
+          </div>
+        </div>
+        <div class="group">
+          <div class="lbl"><span>line height</span><span class="val">0.95</span></div>
+          <input type="range" min="80" max="200" value="95">
+        </div>
+        <div class="group">
+          <div class="lbl"><span>letter spacing</span><span class="val">-0.01em</span></div>
+          <input type="range" min="-5" max="50" value="-1">
+        </div>
+        <div class="group">
+          <div class="lbl"><span>opacity</span><span class="val">100</span></div>
+          <input type="range" min="0" max="100" value="100">
+        </div>
+      </div>
+
+      <!-- canvas -->
+      <div class="tabpane" id="pane-canvas">
+        <div class="lbl" style="margin-bottom:2px">size</div>
+        <div id="presets">
+          <div class="preset"><span class="radio"></span>ig post<span class="dim">1080 × 1080</span></div>
+          <div class="preset"><span class="radio"></span>ig story<span class="dim">1080 × 1920</span></div>
+          <div class="preset on"><span class="radio"></span>flyer · letter<span class="dim">1275 × 1650</span></div>
+          <div class="preset"><span class="radio"></span>a4<span class="dim">1240 × 1754</span></div>
+          <div class="preset" style="border-bottom:none"><span class="radio"></span>custom</div>
+        </div>
+        <div class="wh"><div class="field">w<span class="val">1275</span></div><div class="field">h<span class="val">1650</span></div></div>
+        <div class="group" style="margin-top:20px">
+          <div class="lbl"><span>background</span></div>
+          <div class="swatches"><div class="sw cur" style="background:#ffffff"></div><div class="sw" style="background:#F8F7F4"></div><div class="sw" style="background:#111110"></div><button class="sw add">+</button></div>
+        </div>
+        <div class="export-block">
+          <div class="lbl"><span>export scale</span></div>
+          <div class="seg" data-seg><button>1x</button><button class="on">2x</button><button>3x</button></div>
+          <button class="pill" style="width:100%;padding:13px 0">export png · 2550 × 3300</button>
+          <button class="pill ghost" style="width:100%;padding:12px 0">save project file</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ============ PHONE ============ -->
+<div id="phone">
+  <div class="frame" id="frame">
+    <div class="topbar">
+      <button class="icon-btn"><svg width="15" height="15" viewBox="0 0 14 14"><path d="M9 2 L4 7 L9 12"/></svg></button>
+      <div class="doc-title">untitled flyer</div>
+      <div class="spacer"></div>
+      <button class="icon-btn" title="undo"><svg width="16" height="16" viewBox="0 0 17 17"><path d="M6 3 L2.5 6.5 L6 10"/><path d="M2.5 6.5 H10 a4 4 0 0 1 4 4 v3"/></svg></button>
+      <button class="icon-btn" title="export"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 10 V2 M5 4.5 L8 1.5 L11 4.5"/><path d="M3 8 V13.5 H13 V8"/></svg></button>
+    </div>
+    <div class="workspace">
+      <div class="artboard">
+        <div class="photo"></div>
+        <div class="chip">sat aug 15 · 2–8pm</div>
+        <div class="headline">BLOCK<br>PARTY</div>
+        <div class="subline">fort greene park · free · all ages</div>
+      </div>
+    </div>
+    <div class="toolbar">
+      <button class="tool on" data-tool><svg width="18" height="18" viewBox="0 0 18 18"><path d="M4 2.5 L13.5 9 L8.8 9.8 L11.2 14.6 L9.2 15.6 L6.8 10.8 L4 13.5 Z"/></svg></button>
+      <button class="tool" data-tool style="font-size:16px;font-weight:500">T</button>
+      <button class="tool" data-tool><svg width="18" height="18" viewBox="0 0 18 18"><rect x="3" y="3" width="12" height="12"/></svg></button>
+      <button class="tool" data-tool><svg width="18" height="18" viewBox="0 0 18 18"><rect x="2.5" y="3.5" width="13" height="11"/><circle cx="6.5" cy="7" r="1.4"/><path d="M4 13 L8.5 9 L11 11.5 L13 9.5 L15 11.5"/></svg></button>
+      <button class="tool" data-tool><svg width="18" height="18" viewBox="0 0 18 18"><rect x="6.6" y="1.6" width="6" height="10" rx="1" transform="rotate(45 9 9)"/><path d="M4.5 10.5 L8 14"/></svg></button>
+      <button class="layers-pill" id="openSheet">layers<span style="color:var(--mut2)">5</span></button>
+    </div>
+
+    <div class="overlay" id="phoneOverlay"></div>
+    <div class="sheet">
+      <div class="grab"></div>
+      <div class="sheet-head"><span class="t">layers</span><button class="icon-btn" id="closeSheet"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 3 L11 11 M11 3 L3 11"/></svg></button></div>
+      <div class="sheet-body">
+        <div class="group">
+          <div class="lbl"><span>opacity — block party</span><span class="val">100</span></div>
+          <input type="range" min="0" max="100" value="100">
+        </div>
+        <div class="lrow on"><span class="glyph">T</span><div class="thumb" style="font-family:'Archivo Black'">B</div><div class="lname">block party</div></div>
+        <div class="lrow"><span class="glyph">T</span><div class="thumb" style="font-size:8px;color:var(--mut1)">ab</div><div class="lname">fort greene park · free…</div></div>
+        <div class="lrow"><span class="glyph">▢</span><div class="thumb" style="background:var(--ink)"></div><div class="lname">date chip</div></div>
+        <div class="lrow"><span class="glyph">▣</span><div class="thumb" style="background:linear-gradient(150deg,#22423B,#C97A35)"></div><div class="lname">photo 1</div></div>
+        <div class="lrow"><span class="glyph">□</span><div class="thumb"></div><div class="lname">background</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- mock switcher -->
+<div class="mockbar">
+  <span class="tag">pasteup · mock v1</span>
+  <button class="on" id="btnIpad">ipad</button>
+  <button id="btnPhone">phone</button>
+</div>
+
+<script>
+  // view toggle + scale-to-fit stage (the iPad layout is fixed at 1194x834 and shrinks to fit your screen)
+  const wrapI=document.getElementById('ipadWrap'),ipad=document.getElementById('ipad'),phone=document.getElementById('phone');
+  const bI=document.getElementById('btnIpad'),bP=document.getElementById('btnPhone');
+  function fitIpad(){const s=Math.min((innerWidth-16)/1194,(innerHeight-92)/834);
+    ipad.style.transform='scale('+Math.min(s,1.1)+')';}
+  addEventListener('resize',fitIpad);fitIpad();
+  bI.onclick=()=>{wrapI.style.display='flex';phone.style.display='none';bI.classList.add('on');bP.classList.remove('on');fitIpad();};
+  bP.onclick=()=>{wrapI.style.display='none';phone.style.display='flex';bP.classList.add('on');bI.classList.remove('on');};
+
+  // popovers: font picker, color picker, shape menu
+  const pops=[...document.querySelectorAll('.pop')];
+  const closePops=()=>pops.forEach(p=>p.classList.remove('open'));
+  function wire(el,pop){el.addEventListener('click',e=>{e.stopPropagation();
+    const was=pop.classList.contains('open');closePops();if(!was)pop.classList.add('open');});}
+  wire(document.getElementById('fontField'),document.getElementById('popFont'));
+  wire(document.getElementById('toolShape'),document.getElementById('popShape'));
+  wire(document.getElementById('fillSwatches'),document.getElementById('popColor'));
+  pops.forEach(p=>p.addEventListener('click',e=>e.stopPropagation()));
+  document.addEventListener('click',closePops);
+
+  // panel tabs
+  document.querySelectorAll('#ipadTabs .tab').forEach(t=>t.onclick=()=>{
+    document.querySelectorAll('#ipadTabs .tab').forEach(x=>x.classList.remove('on'));
+    document.querySelectorAll('.tabpane').forEach(x=>x.classList.remove('on'));
+    t.classList.add('on');document.getElementById(t.dataset.pane).classList.add('on');
+  });
+
+  // tools, segmented controls, layer rows, presets — visual state only
+  const pick=(sel,cls='on')=>document.querySelectorAll(sel).forEach(el=>el.onclick=()=>{
+    el.parentElement.querySelectorAll(':scope > *').forEach(s=>s.classList.remove(cls));el.classList.add(cls);});
+  pick('.rail [data-tool]');pick('.toolbar [data-tool]');pick('#layerList .lrow');pick('#presets .preset');
+  document.querySelectorAll('[data-seg]').forEach(seg=>seg.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    seg.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');}));
+
+  // live slider readouts
+  document.querySelectorAll('input[type=range]').forEach(r=>{
+    const out=r.closest('.group')?.querySelector('.val');
+    if(out)r.oninput=()=>{out.textContent=r.max==='200'?(r.value/100).toFixed(2):r.max==='50'?(r.value/100).toFixed(2)+'em':r.value;};
+  });
+
+  // phone sheet
+  const frame=document.getElementById('frame');
+  document.getElementById('openSheet').onclick=()=>frame.classList.add('sheet-open');
+  document.getElementById('closeSheet').onclick=()=>frame.classList.remove('sheet-open');
+  document.getElementById('phoneOverlay').onclick=()=>frame.classList.remove('sheet-open');
+</script>
+</body>
+</html>
