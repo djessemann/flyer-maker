@@ -80,3 +80,76 @@ both pinned.
 - **Zoom** moved to a floating pill over the canvas, freeing top-bar width.
 - **Service worker** is network-first for same-origin files, so a deploy shows
   up on the next load instead of being pinned to a stale cache.
+
+---
+
+# ui revision — v3
+
+v2 fixed *reachability* (controls existed and could be tapped) but created a
+different problem: everything became a modal. A measured pass over real tasks on
+a 393×800 touch viewport found the following, and this revision addresses each.
+
+## 1. you could not see what you were changing
+
+**Measured.** The colour and font sheets were 656px tall on an 800px screen. With
+a headline selected, sheet-vs-object overlap was **100%** — for text in the lower
+third *and* mid-flyer. Every colour decision was made blind, then verified by
+closing the sheet.
+
+**Now.** Sheets are capped (`56dvh`, `72dvh` for the font browser), and opening
+one pans the canvas so the selected object sits in the strip left above it. The
+canvas returns to where it was on close. Measured overlap: **0% for both**, with
+a regression test asserting it.
+
+## 2. the bar kept its own controls out of reach
+
+**Measured.** The text bar needed 547px of width in a 393px viewport; `opacity`,
+`layers` and `more` sat off-screen — including `more`, which holds delete.
+
+**Now.** Six items, **393px in 393px**, nothing off-screen. Related controls were
+merged rather than dropped (see §4).
+
+## 3. adding things was a hidden mode
+
+`text · photo · shape` only appeared when nothing was selected. Adding a photo
+auto-selected it, so the add verbs vanished and the only way back was tapping
+empty canvas — which nothing taught.
+
+**Now.** An `add` button leads every selected-object bar. The empty-canvas bar
+still shows the three verbs directly, so the common case stays one tap.
+
+## 4. one modal per property
+
+Eight sheets for a single text layer; `opacity` dimmed the whole screen for one
+slider. Styling four properties cost 12 interactions.
+
+**Now, for text:** `add · edit · font · colour · size · more` —
+three sheets plus one inline slider.
+
+- **Inline sliders** for simple values (font size, corner radius): the slider
+  replaces the bar in place. No sheet, no dimming, artwork fully visible.
+- **The bar stays live above an open sheet.** The overlay stops short of it, so
+  tapping another action swaps the sheet instead of stacking — colour → font →
+  size without closing anything. Styling four properties: **12 → 10**, and the
+  round trips of close-look-reopen are gone entirely.
+- `align`, `line height`, `letter spacing`, `opacity`, order, lock, duplicate and
+  delete live together under `more`. Stroke thickness moved in with stroke colour.
+- The colour picker is folded behind **custom colour**, so the sheet opens at
+  311px of swatches instead of 656px of everything.
+
+## 5. smaller repairs
+
+- **Erase instructions were invisible on phones** — the hint was `display:none`
+  under 560px, hiding the only guidance for the headline feature. It now sits with
+  the brush controls, visible at every size, and the button reads "erase it".
+- **No way to discover text editing** (double-tap only). There's now an `edit`
+  button, and while typing the bar becomes an editing state with one clear `done`.
+- **Background colour lived in two sheets.** The layers list now shows background
+  as a row that points at the canvas sheet, where the colour actually lives.
+
+## what was already fine, and kept
+
+Contrast measured 6.96:1 against a 4.5:1 requirement; targets are 60×64px in the
+bar and 44px on canvas handles; chrome takes 15% of the screen with the artboard
+filling 87% of what's left. The contextual-bar concept and the contents of the
+colour and font sheets were right in v2 — the problem was where they appeared.

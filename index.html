@@ -58,15 +58,15 @@
   <div class="rt-top">
     <button class="pill ghost" id="rtCancel">cancel</button>
     <div class="spacer"></div>
-    <div class="rt-title" id="rtHint">paint over what you want gone</div>
-    <div class="spacer"></div>
-    <button class="pill" id="rtGo">erase</button>
+    <button class="pill" id="rtGo">erase it</button>
   </div>
   <div class="rt-stage" id="rtStage">
     <canvas id="rtImg"></canvas>
     <canvas id="rtMask"></canvas>
   </div>
   <div class="rt-bar">
+    <!-- the instruction sits with the controls so it's visible on every size -->
+    <div class="rt-title" id="rtHint">paint over what you want gone, then tap “erase it”</div>
     <div class="rt-brush">
       <span class="lbl">brush</span>
       <input type="range" id="rtSize" min="10" max="140" value="48">

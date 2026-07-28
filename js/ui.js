@@ -1,5 +1,5 @@
-// the interface: a contextual action bar that changes with the selection, and
-// single-purpose sheets. every control is one tap from whatever is selected.
+// the interface: a contextual bar under the canvas, inline sliders for simple
+// values, and short sheets that never hide the thing you're changing.
 import { on, emit } from './bus.js';
 import {
   ed, fabric, PRESETS, layerName, markDirty,
@@ -17,25 +17,26 @@ const esc = s => String(s).replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 let sheetEl, overlayEl, bodyEl, titleEl, backEl;
-let stack = [];          // sheet history for the back chevron
+let stack = [];          // sheet history, for the back chevron
 let sampling = null;     // pending eyedropper callback
+let inlineOpen = false;  // an inline slider has taken over the bar
+let savedVpt = null;     // viewport to restore after a sheet pans the canvas
 
 /* ================= icons ================= */
 
 const I = {
+  plus: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 3.5 V16.5 M3.5 10 H16.5"/></svg>',
   text: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M3 5.5 V3.5 H17 V5.5 M10 3.5 V16.5 M7 16.5 H13"/></svg>',
+  edit: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M11 3.5 H3.5 V16.5 H16.5 V9"/><path d="M8 12 L16.5 3.5 L18 5 L9.5 13.5 Z"/></svg>',
   photo: '<svg viewBox="0 0 20 20" width="20" height="20"><rect x="2.5" y="4" width="15" height="12"/><circle cx="7" cy="8" r="1.5"/><path d="M4 14.5 L9 9.5 L12 12.5 L14 10.5 L16.5 13"/></svg>',
   shape: '<svg viewBox="0 0 20 20" width="20" height="20"><rect x="2.5" y="2.5" width="10" height="10"/><circle cx="13" cy="13" r="4.5"/></svg>',
   layers: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 2.5 L18 7 L10 11.5 L2 7 Z"/><path d="M2 11 L10 15.5 L18 11"/></svg>',
   canvas: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M2.5 5.5 H17.5 M2.5 10 H17.5 M2.5 14.5 H17.5"/><circle cx="7" cy="5.5" r="1.8" fill="var(--paper)"/><circle cx="13" cy="10" r="1.8" fill="var(--paper)"/><circle cx="8.5" cy="14.5" r="1.8" fill="var(--paper)"/></svg>',
   font: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M2 16 L6.5 4 L11 16 M3.4 12.4 H9.6"/><path d="M17.5 9.6 a3 3 0 0 0-5.6 1.2 M17.5 8.5 V16 M17.5 12.6 a2.6 2.6 0 1 1-5.2 .4 a2.6 2.6 0 0 1 5.2-.4Z"/></svg>',
   size: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M1.5 15.5 L5.5 6 L9.5 15.5 M2.7 12.9 H8.3"/><path d="M12 15.5 L15 8.5 L18 15.5 M12.9 13.6 H17.1"/></svg>',
-  align: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M2.5 4.5 H17.5 M2.5 9 H12 M2.5 13.5 H15"/></svg>',
-  spacing: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M2.5 6 H17.5 M2.5 14 H17.5"/><path d="M10 8.5 V11.5 M8.4 9.6 L10 8 L11.6 9.6 M8.4 10.4 L10 12 L11.6 10.4"/></svg>',
-  opacity: '<svg viewBox="0 0 20 20" width="20" height="20"><circle cx="10" cy="10" r="7.5"/><path d="M10 2.5 a7.5 7.5 0 0 1 0 15 Z" fill="currentColor" stroke="none"/></svg>',
   erase: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M9.5 3.5 L16.5 10.5 L11 16 L4 9 Z"/><path d="M6.5 11.5 H16"/><path d="M2.5 17.5 H10"/></svg>',
   replace: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M3 7.5 H14 M11 4.5 L14 7.5 L11 10.5"/><path d="M17 12.5 H6 M9 9.5 L6 12.5 L9 15.5"/></svg>',
-  flip: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 2.5 V17.5"/><path d="M7.5 6 L2.5 10 L7.5 14 Z"/><path d="M12.5 6 L17.5 10 L12.5 14 Z"/></svg>',
+  adjust: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 2.5 V17.5"/><path d="M7.5 6 L2.5 10 L7.5 14 Z"/><path d="M12.5 6 L17.5 10 L12.5 14 Z"/></svg>',
   stroke: '<svg viewBox="0 0 20 20" width="20" height="20"><rect x="3" y="3" width="14" height="14" stroke-width="3"/></svg>',
   radius: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M3 17 V8 a5 5 0 0 1 5-5 H17"/></svg>',
   more: '<svg viewBox="0 0 20 20" width="20" height="20"><circle cx="4" cy="10" r="1.4" fill="currentColor" stroke="none"/><circle cx="10" cy="10" r="1.4" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1.4" fill="currentColor" stroke="none"/></svg>',
@@ -47,8 +48,7 @@ const I = {
   eye: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M1.5 10 C4 6 6.8 4.2 10 4.2 s6 1.8 8.5 5.8 c-2.5 4-5.3 5.8-8.5 5.8 s-6-1.8-8.5-5.8 Z"/><circle cx="10" cy="10" r="2.2"/></svg>',
   eyeOff: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M1.5 10 C4 6 6.8 4.2 10 4.2 s6 1.8 8.5 5.8 c-2.5 4-5.3 5.8-8.5 5.8 s-6-1.8-8.5-5.8 Z"/><path d="M3 17 L17 3"/></svg>',
   del: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M3.5 5.5 H16.5 M8 5.5 V3.5 H12 V5.5 M5.5 5.5 L6.4 17 H13.6 L14.5 5.5"/></svg>',
-  drop: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 2.5 C10 2.5 4.5 9 4.5 12.2 a5.5 5.5 0 0 0 11 0 C15.5 9 10 2.5 10 2.5 Z"/></svg>',
-  plus: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 4 V16 M4 10 H16"/></svg>',
+  fit: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M3 7 V3.5 H6.5 M13.5 3.5 H17 V7 M17 13 V16.5 H13.5 M6.5 16.5 H3 V13"/></svg>',
 };
 
 /* ================= toast ================= */
@@ -62,16 +62,41 @@ export function showToast(msg, ms = 2800) {
   toastTimer = setTimeout(() => t.classList.remove('on'), ms);
 }
 
+/* ================= keeping the artwork visible ================= */
+
+// slide the canvas so the selected object sits in the strip left above a sheet
+function panSelectionIntoView() {
+  const o = ed.canvas.getActiveObject();
+  if (!o || !sheetEl.classList.contains('on')) return;
+  // derive the sheet's resting top from its height and css offset — its live
+  // rect is still mid-transition when this runs
+  const bottomPx = parseFloat(getComputedStyle(sheetEl).bottom) || 0;
+  const sheetTop = innerHeight - bottomPx - sheetEl.offsetHeight;
+  const cRect = ed.canvas.lowerCanvasEl.getBoundingClientRect();
+  const stripH = Math.min(cRect.height, sheetTop - cRect.top);
+  if (stripH < 60) return;
+
+  const vt = ed.canvas.viewportTransform;
+  const r = o.getBoundingRect();
+  const objTop = r.top * vt[3] + vt[5];
+  const objH = r.height * vt[3];
+  const target = objH >= stripH - 24 ? 12 : (stripH - objH) / 2;
+  const dy = target - objTop;
+  if (Math.abs(dy) < 4) return;
+  vt[5] += dy;
+  ed.canvas.setViewportTransform(vt);
+  ed.canvas.requestRenderAll();
+}
+
 /* ================= sheet plumbing ================= */
 
-function openSheet(title, html, wire, { push = true } = {}) {
-  if (push && sheetEl.classList.contains('on') && stack.length) {
-    stack[stack.length - 1].scroll = bodyEl.scrollTop;
-  } else if (!push) {
-    stack = [];
-  }
-  const entry = { title, html, wire, scroll: 0 };
-  if (push) stack.push(entry); else stack = [entry];
+function openSheet(title, html, wire, opts = {}) {
+  const fresh = !sheetEl.classList.contains('on');
+  if (fresh) savedVpt = [...ed.canvas.viewportTransform];
+  if (opts.push === false) stack = [];
+  else if (stack.length) stack[stack.length - 1].scroll = bodyEl.scrollTop;
+
+  stack.push({ title, html, wire, scroll: 0, tall: !!opts.tall });
   paintSheet();
 }
 
@@ -81,14 +106,27 @@ function paintSheet() {
   titleEl.textContent = cur.title;
   bodyEl.innerHTML = cur.html;
   backEl.classList.toggle('hidden', stack.length < 2);
+  sheetEl.classList.toggle('tall', cur.tall);
   sheetEl.classList.add('on');
   overlayEl.classList.add('on');
   if (cur.wire) cur.wire(bodyEl);
   bodyEl.scrollTop = cur.scroll || 0;
+  requestAnimationFrame(panSelectionIntoView);
 }
 
 export function closeSheet() {
-  sheetEl.classList.remove('on');
+  hideSheet();
+  if (savedVpt) {
+    ed.canvas.setViewportTransform(savedVpt);
+    ed.canvas.requestRenderAll();
+    savedVpt = null;
+  }
+}
+
+// dismiss the sheet without giving back the canvas position (used when an
+// inline control takes over — the pan is still wanted)
+function hideSheet() {
+  sheetEl.classList.remove('on', 'tall');
   overlayEl.classList.remove('on');
   stack = [];
 }
@@ -99,19 +137,46 @@ function sheetBack() {
   paintSheet();
 }
 
-// refresh the sheet in place (after a value changes elsewhere)
+// rebuild the current sheet in place after a value changes
 function refreshSheet() {
   if (!sheetEl.classList.contains('on') || !stack.length) return;
   const cur = stack[stack.length - 1];
-  if (cur.rebuild) {
-    const next = cur.rebuild();
-    cur.html = next.html;
-    cur.wire = next.wire;
-    const y = bodyEl.scrollTop;
-    bodyEl.innerHTML = cur.html;
-    if (cur.wire) cur.wire(bodyEl);
-    bodyEl.scrollTop = y;
-  }
+  if (!cur.rebuild) return;
+  const next = cur.rebuild();
+  cur.html = next.html;
+  cur.wire = next.wire;
+  const y = bodyEl.scrollTop;
+  bodyEl.innerHTML = cur.html;
+  if (cur.wire) cur.wire(bodyEl);
+  bodyEl.scrollTop = y;
+}
+
+/* ================= inline slider (no sheet, nothing hidden) ================= */
+
+function inlineSlider({ label, min, max, step = 1, get, format, apply }) {
+  const bar = $('#actionbar');
+  inlineOpen = true;
+  bar.classList.add('inline-mode');
+  bar.innerHTML = `
+    <div class="inline">
+      <span class="inline-l">${label}</span>
+      <input type="range" min="${min}" max="${max}" step="${step}" value="${get()}" data-in>
+      <span class="inline-v" data-v>${format(get())}</span>
+      <button class="inline-done" data-done>done</button>
+    </div>`;
+  const s = bar.querySelector('[data-in]');
+  const v = bar.querySelector('[data-v]');
+  s.addEventListener('input', () => {
+    apply(+s.value);
+    v.textContent = format(+s.value);
+    ed.canvas.requestRenderAll();
+    markDirty(true);
+  });
+  bar.querySelector('[data-done]').addEventListener('click', () => {
+    inlineOpen = false;
+    bar.classList.remove('inline-mode');
+    renderBar();
+  });
 }
 
 /* ================= init ================= */
@@ -125,13 +190,16 @@ export function initUI() {
   backEl.addEventListener('click', sheetBack);
   overlayEl.addEventListener('click', closeSheet);
 
-  on('selection', renderBar);
-  on('layers', () => { renderBar(); refreshSheet(); });
+  on('selection', () => { if (!inlineOpen) renderBar(); });
+  on('layers', () => { if (!inlineOpen) renderBar(); refreshSheet(); });
   on('doc:open', () => { closeSheet(); renderBar(); });
   on('doc:change', refreshSheet);
   on('toast', showToast);
 
   ed.canvas.on('mouse:down', onCanvasSample);
+  ed.canvas.on('text:editing:entered', renderEditingBar);
+  ed.canvas.on('text:editing:exited', () => { inlineOpen = false; renderBar(); });
+
   renderBar();
 }
 
@@ -161,13 +229,15 @@ const actDot = (key, color, label) =>
   `<button class="act" data-a="${key}"><span class="act-ico"><span class="act-dot" style="background:${color || '#fff'}"></span></span><span class="act-l">${label}</span></button>`;
 const sep = '<span class="act-sep"></span>';
 
-function renderBar() {
+export function renderBar() {
   const bar = $('#actionbar');
   if (!bar || !ed.open) return;
+  bar.classList.remove('inline-mode');
   const o = ed.canvas.getActiveObject();
   let html;
 
   if (!o || o.pKind === 'bg') {
+    // nothing selected: the three add verbs are right here, one tap each
     html =
       act('add-text', I.text, 'text') +
       act('add-photo', I.photo, 'photo') +
@@ -177,36 +247,27 @@ function renderBar() {
       act('canvas', I.canvas, 'canvas');
   } else if (o.pKind === 'text') {
     html =
+      act('add', I.plus, 'add') +
+      act('edit', I.edit, 'edit') +
       act('font', I.font, 'font') +
       actDot('fill', o.fill, 'color') +
       act('size', I.size, 'size') +
-      act('align', I.align, 'align') +
-      act('spacing', I.spacing, 'spacing') +
-      act('opacity', I.opacity, 'opacity') +
-      sep +
-      act('layers', I.layers, 'layers') +
       act('more', I.more, 'more');
   } else if (o.pKind === 'image') {
     html =
-      act('erase', I.erase, 'erase object', 'primary') +
+      act('add', I.plus, 'add') +
+      act('erase', I.erase, 'erase', 'primary') +
       act('replace', I.replace, 'replace') +
-      act('flip', I.flip, 'flip') +
-      act('opacity', I.opacity, 'opacity') +
-      act('fitimg', I.canvas, 'fit') +
-      sep +
-      act('layers', I.layers, 'layers') +
+      act('adjust', I.adjust, 'adjust') +
       act('more', I.more, 'more');
   } else {
     const isLine = o.pKind === 'line';
     const isRect = o.pKind === 'rect' || o.pKind === 'rounded';
     html =
+      act('add', I.plus, 'add') +
       (isLine ? '' : actDot('fill', o.fill, 'fill')) +
-      actDot('stroke', o.stroke || '#fff', isLine ? 'color' : 'stroke') +
-      act('strokew', I.stroke, 'weight') +
-      (isRect ? act('radius', I.radius, 'corners') : '') +
-      act('opacity', I.opacity, 'opacity') +
-      sep +
-      act('layers', I.layers, 'layers') +
+      actDot('stroke', o.stroke || '#ffffff', isLine ? 'color' : 'stroke') +
+      (isRect ? act('corners', I.radius, 'corners') : '') +
       act('more', I.more, 'more');
   }
 
@@ -216,7 +277,25 @@ function renderBar() {
   markScrollable(bar);
 }
 
-// fade the trailing edge only while there's more bar to reach
+// while typing, the bar gets out of the way and offers one clear exit
+function renderEditingBar() {
+  const bar = $('#actionbar');
+  inlineOpen = true;
+  bar.classList.add('inline-mode');
+  bar.innerHTML = `
+    <div class="inline">
+      <span class="inline-l">editing text</span>
+      <span class="spacer"></span>
+      <button class="pill" data-done style="padding:11px 26px">done</button>
+    </div>`;
+  bar.querySelector('[data-done]').addEventListener('click', () => {
+    const o = ed.canvas.getActiveObject();
+    if (o && o.isEditing) o.exitEditing();
+    inlineOpen = false;
+    renderBar();
+  });
+}
+
 function markScrollable(bar) {
   const update = () => {
     const over = bar.scrollWidth > bar.clientWidth + 2;
@@ -232,39 +311,60 @@ function markScrollable(bar) {
 }
 
 async function runAction(key, o) {
+  // the bar stays live above an open sheet — tapping another action swaps the
+  // sheet rather than stacking, so you can move colour → font → size freely
+  const SHEETY = ['add', 'add-shape', 'layers', 'canvas', 'font', 'fill', 'stroke', 'adjust', 'more'];
+  if (SHEETY.includes(key)) stack.length = 0;
+  if (key === 'size' || key === 'corners') hideSheet();
+
   switch (key) {
+    case 'add': sheetAdd(); break;
     case 'add-text': addText(); break;
     case 'add-photo': pickImage(f => addImageFromFile(f)); break;
     case 'add-shape': sheetShapes(); break;
     case 'layers': sheetLayers(); break;
     case 'canvas': sheetCanvas(); break;
-    case 'font': sheetFont(o); break;
-    case 'fill': sheetColor('color', o.fill, c => { o.set('fill', c); applied(); }); break;
-    case 'stroke':
-      sheetColor('stroke', o.stroke || '#111110', c => {
-        o.set('stroke', c);
-        if (!o.strokeWidth) o.set('strokeWidth', Math.max(2, Math.round(ed.docW * 0.006)));
-        applied();
-      }, { allowNone: o.pKind !== 'line', onNone: () => { o.set({ stroke: null, strokeWidth: 0 }); applied(); } });
+
+    case 'edit':
+      ed.canvas.setActiveObject(o);
+      o.enterEditing();
+      o.selectAll();
+      ed.canvas.requestRenderAll();
       break;
-    case 'size': sheetSize(o); break;
-    case 'align': sheetAlign(o); break;
-    case 'spacing': sheetSpacing(o); break;
-    case 'opacity': sheetOpacity(o); break;
-    case 'strokew': sheetStrokeWidth(o); break;
-    case 'radius': sheetRadius(o); break;
+
+    case 'font': sheetFont(o); break;
+    case 'fill': sheetColor('color', o.fill, c => { o.set('fill', c); afterChange(); }); break;
+    case 'stroke': sheetStroke(o); break;
+
+    case 'size':
+      inlineSlider({
+        label: 'size', min: 8, max: 400,
+        get: () => Math.round(o.fontSize),
+        format: v => v + 'px',
+        apply: v => o.set('fontSize', v),
+      });
+      break;
+
+    case 'corners':
+      inlineSlider({
+        label: 'corners', min: 0, max: Math.round(Math.min(o.width, o.height) / 2),
+        get: () => Math.round(o.rx || 0),
+        format: v => v + 'px',
+        apply: v => o.set({ rx: v, ry: v }),
+      });
+      break;
+
     case 'erase': emit('retouch:open', o); break;
     case 'replace': pickImage(f => replaceImage(o, f)); break;
-    case 'flip': sheetFlip(o); break;
-    case 'fitimg': resetImageSize(o); showToast('photo fit to the canvas'); break;
+    case 'adjust': sheetAdjust(o); break;
     case 'more': sheetMore(o); break;
   }
 }
 
-function applied() {
+function afterChange() {
   ed.canvas.requestRenderAll();
   markDirty(true);
-  renderBar();
+  if (!inlineOpen) renderBar();
 }
 
 function pickImage(fn) {
@@ -277,216 +377,23 @@ function pickImage(fn) {
   input.click();
 }
 
-/* ================= slider sheet helper ================= */
+/* ================= sheet: add ================= */
 
-function sliderSheet(title, cfg) {
-  // cfg: {label, min, max, value, format, apply, extraHtml, extraWire}
-  const build = () => {
-    const html = `
-      <div class="group">
-        <div class="lbl"><span>${cfg.label}</span><span class="val" data-out>${cfg.format(cfg.get())}</span></div>
-        <input type="range" min="${cfg.min}" max="${cfg.max}" step="${cfg.step || 1}" value="${cfg.raw()}" data-slider>
-      </div>${cfg.extraHtml ? cfg.extraHtml() : ''}`;
-    const wire = root => {
-      const s = root.querySelector('[data-slider]');
-      const out = root.querySelector('[data-out]');
-      s.addEventListener('input', () => {
-        cfg.apply(+s.value);
-        out.textContent = cfg.format(cfg.get());
-        ed.canvas.requestRenderAll();
-        markDirty(true);
-      });
-      s.addEventListener('change', () => renderBar());
-      if (cfg.extraWire) cfg.extraWire(root, s, out);
-    };
-    return { html, wire };
-  };
-  const b = build();
-  openSheet(title, b.html, b.wire);
-  stack[stack.length - 1].rebuild = build;
-}
-
-/* ================= sheets: object properties ================= */
-
-function sheetOpacity(o) {
-  sliderSheet('opacity', {
-    label: 'opacity', min: 0, max: 100,
-    get: () => Math.round((o.opacity ?? 1) * 100),
-    raw: () => Math.round((o.opacity ?? 1) * 100),
-    format: v => v + '%',
-    apply: v => o.set('opacity', v / 100),
-  });
-}
-
-function sheetSize(o) {
-  sliderSheet('size', {
-    label: 'font size', min: 8, max: 400,
-    get: () => Math.round(o.fontSize),
-    raw: () => Math.round(o.fontSize),
-    format: v => v + 'px',
-    apply: v => o.set('fontSize', v),
-    extraHtml: () => `
-      <div class="group"><div class="lbl"><span>nudge</span></div>
-        <div class="stepper"><button data-st="-1">–</button>
-        <input class="num" data-num inputmode="numeric" value="${Math.round(o.fontSize)}">
-        <button data-st="1">+</button></div></div>`,
-    extraWire: (root, slider, out) => {
-      const num = root.querySelector('[data-num]');
-      const set = v => {
-        const s = Math.max(8, Math.min(400, Math.round(v) || o.fontSize));
-        o.set('fontSize', s);
-        num.value = s; slider.value = s; out.textContent = s + 'px';
-        ed.canvas.requestRenderAll(); markDirty(true);
-      };
-      root.querySelectorAll('[data-st]').forEach(b =>
-        b.addEventListener('click', () => set(+num.value + +b.dataset.st * 2)));
-      num.addEventListener('change', () => set(+num.value));
-      slider.addEventListener('input', () => { num.value = Math.round(o.fontSize); });
-    },
-  });
-}
-
-function sheetStrokeWidth(o) {
-  sliderSheet('stroke weight', {
-    label: 'weight', min: 0, max: 48,
-    get: () => Math.round(o.strokeWidth || 0),
-    raw: () => Math.round(o.strokeWidth || 0),
-    format: v => v + 'px',
-    apply: v => {
-      o.set('strokeWidth', v);
-      if (v > 0 && !o.stroke) o.set('stroke', '#111110');
-      o.setCoords();
-    },
-  });
-}
-
-function sheetRadius(o) {
-  const max = Math.round(Math.min(o.width, o.height) / 2);
-  sliderSheet('corners', {
-    label: 'corner radius', min: 0, max,
-    get: () => Math.round(o.rx || 0),
-    raw: () => Math.round(o.rx || 0),
-    format: v => v + 'px',
-    apply: v => o.set({ rx: v, ry: v }),
-  });
-}
-
-function sheetAlign(o) {
-  const build = () => {
-    const opts = ['left', 'center', 'right'];
-    const html = `
-      <div class="group"><div class="lbl"><span>text align</span></div>
-        <div class="seg" data-align>${opts.map(a =>
-          `<button data-v="${a}" class="${o.textAlign === a ? 'on' : ''}">${a}</button>`).join('')}</div></div>
-      <div class="group"><div class="lbl"><span>position on the flyer</span></div>
-        <div class="rowbtns">
-          <button class="pill ghost" data-pos="cx">centre across</button>
-          <button class="pill ghost" data-pos="cy">centre down</button>
-        </div></div>`;
-    const wire = root => {
-      root.querySelector('[data-align]').addEventListener('click', e => {
-        const b = e.target.closest('[data-v]');
-        if (!b) return;
-        o.set('textAlign', b.dataset.v);
-        root.querySelectorAll('[data-v]').forEach(x => x.classList.toggle('on', x === b));
-        ed.canvas.requestRenderAll(); markDirty(true);
-      });
-      root.querySelectorAll('[data-pos]').forEach(b => b.addEventListener('click', () => {
-        const r = o.getBoundingRect();
-        if (b.dataset.pos === 'cx') o.set('left', o.left + (ed.docW - r.width) / 2 - r.left);
-        else o.set('top', o.top + (ed.docH - r.height) / 2 - r.top);
-        o.setCoords();
-        ed.canvas.requestRenderAll(); markDirty(true);
-      }));
-    };
-    return { html, wire };
-  };
-  const b = build();
-  openSheet('align', b.html, b.wire);
-  stack[stack.length - 1].rebuild = build;
-}
-
-function sheetSpacing(o) {
-  const build = () => {
-    const lh = o.lineHeight ?? 1.16;
-    const ls = o.charSpacing || 0;
-    const html = `
-      <div class="group">
-        <div class="lbl"><span>line height</span><span class="val" data-lho>${lh.toFixed(2)}</span></div>
-        <input type="range" min="70" max="220" value="${Math.round(lh * 100)}" data-lh>
-      </div>
-      <div class="group">
-        <div class="lbl"><span>letter spacing</span><span class="val" data-lso>${(ls / 1000).toFixed(2)}em</span></div>
-        <input type="range" min="-60" max="500" value="${ls}" data-ls>
-      </div>`;
-    const wire = root => {
-      const lhI = root.querySelector('[data-lh]'), lsI = root.querySelector('[data-ls]');
-      lhI.addEventListener('input', () => {
-        o.set('lineHeight', lhI.value / 100);
-        root.querySelector('[data-lho]').textContent = (lhI.value / 100).toFixed(2);
-        ed.canvas.requestRenderAll(); markDirty(true);
-      });
-      lsI.addEventListener('input', () => {
-        o.set('charSpacing', +lsI.value);
-        root.querySelector('[data-lso]').textContent = (lsI.value / 1000).toFixed(2) + 'em';
-        ed.canvas.requestRenderAll(); markDirty(true);
-      });
-    };
-    return { html, wire };
-  };
-  const b = build();
-  openSheet('spacing', b.html, b.wire);
-  stack[stack.length - 1].rebuild = build;
-}
-
-function sheetFlip(o) {
-  const build = () => ({
-    html: `
-      <div class="group"><div class="lbl"><span>flip the photo</span></div>
-        <div class="rowbtns">
-          <button class="pill ghost" data-f="x">horizontal</button>
-          <button class="pill ghost" data-f="y">vertical</button>
-        </div></div>
-      <div class="group"><div class="lbl"><span>rotation</span><span class="val" data-ro>${Math.round(o.angle || 0)}°</span></div>
-        <input type="range" min="-180" max="180" value="${Math.round(o.angle || 0)}" data-rot></div>`,
-    wire: root => {
-      root.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => {
-        o.set(b.dataset.f === 'x' ? 'flipX' : 'flipY', !(b.dataset.f === 'x' ? o.flipX : o.flipY));
-        ed.canvas.requestRenderAll(); markDirty(true);
-      }));
-      const r = root.querySelector('[data-rot]');
-      r.addEventListener('input', () => {
-        o.rotate(+r.value);
-        root.querySelector('[data-ro]').textContent = r.value + '°';
-        ed.canvas.requestRenderAll(); markDirty(true);
-      });
-    },
-  });
-  const b = build();
-  openSheet('flip & rotate', b.html, b.wire);
-  stack[stack.length - 1].rebuild = build;
-}
-
-function sheetMore(o) {
+function sheetAdd() {
   const html = `
-    <button class="srow" data-m="dup">${I.dup}duplicate</button>
-    <button class="srow" data-m="fwd">${I.fwd}bring forward</button>
-    <button class="srow" data-m="back">${I.back}send backward</button>
-    <button class="srow" data-m="lock">${o.pLocked ? I.unlock : I.lock}${o.pLocked ? 'unlock' : 'lock'}</button>
-    <button class="srow danger" data-m="del">${I.del}delete</button>`;
-  openSheet('layer', html, root => {
-    root.querySelectorAll('[data-m]').forEach(b => b.addEventListener('click', () => {
-      const m = b.dataset.m;
-      if (m === 'dup') { duplicateObject(o); closeSheet(); }
-      if (m === 'fwd') { reorder(o, 'forward'); closeSheet(); }
-      if (m === 'back') { reorder(o, 'backward'); closeSheet(); }
-      if (m === 'lock') { setLocked(o, !o.pLocked); closeSheet(); }
-      if (m === 'del') { deleteObject(o); closeSheet(); }
+    <button class="srow" data-x="text">${I.text}text</button>
+    <button class="srow" data-x="photo">${I.photo}photo</button>
+    <button class="srow" data-x="shape">${I.shape}shape</button>`;
+  openSheet('add to your flyer', html, root => {
+    root.querySelectorAll('[data-x]').forEach(b => b.addEventListener('click', () => {
+      const x = b.dataset.x;
+      closeSheet();
+      if (x === 'text') addText();
+      if (x === 'photo') pickImage(f => addImageFromFile(f));
+      if (x === 'shape') sheetShapes();
     }));
   });
 }
-
-/* ================= sheet: add shape ================= */
 
 function sheetShapes() {
   const html = `
@@ -502,9 +409,9 @@ function sheetShapes() {
   });
 }
 
-/* ================= sheet: color ================= */
+/* ================= sheet: colour ================= */
 
-const NEUTRALS = ['#111110', '#3d3d3a', '#555555', '#999999', '#d9d7d1', '#e8e6e0', '#f8f7f4', '#ffffff'];
+const NEUTRALS = ['#111110', '#555555', '#999999', '#d9d7d1', '#f8f7f4', '#ffffff'];
 const PALETTE = [
   '#cc3333', '#e2582c', '#e8a45c', '#f2d16b', '#7fa650', '#22423b',
   '#3a6156', '#2f6f8f', '#26408b', '#5b3f8c', '#a8447f', '#c97a35',
@@ -513,28 +420,30 @@ const PALETTE = [
 export function sheetColor(title, initial, onChange, opts = {}) {
   let { h, s, v } = hexToHsv(initial || '#111110');
   let current = initial || '#111110';
+  let custom = false;      // the picker stays folded away until asked for
 
   const build = () => {
     const docCols = collectDocColors().filter(c => !NEUTRALS.includes(c) && !PALETTE.includes(c));
     const swatch = c =>
       `<button class="sw${c.toLowerCase() === (current || '').toLowerCase() ? ' cur' : ''}" data-c="${c}" style="background:${c}"></button>`;
     const html = `
-      <div class="group">
-        <div class="swatches">
-          ${opts.allowNone ? '<button class="sw none" data-none></button>' : ''}
-          ${[...NEUTRALS, ...PALETTE, ...docCols].map(swatch).join('')}
-        </div>
+      <div class="swatches">
+        ${opts.allowNone ? '<button class="sw none" data-none></button>' : ''}
+        ${[...NEUTRALS, ...PALETTE, ...docCols].map(swatch).join('')}
       </div>
-      <div class="group">
-        <div class="lbl"><span>custom</span></div>
+      <div class="cp-actions">
+        <button class="pill ghost" data-custom>${custom ? 'hide picker' : 'custom colour'}</button>
+        <button class="pill ghost" data-sample>pick from flyer</button>
+      </div>
+      <div class="cp-wrap${custom ? '' : ' hidden'}">
         <div class="cp-sq"><span class="cp-dot"></span></div>
         <div class="cp-hue"><span class="cp-mark"></span></div>
         <div class="cp-row">
           <span class="cp-cur" data-cur></span>
           <label class="field" style="flex:1">hex<input data-hex spellcheck="false" autocapitalize="off"></label>
         </div>
-        <button class="pill ghost" style="width:100%" data-sample>${'sample a color from the flyer'}</button>
       </div>`;
+
     const wire = root => {
       const sq = root.querySelector('.cp-sq'), dot = root.querySelector('.cp-dot');
       const hue = root.querySelector('.cp-hue'), mark = root.querySelector('.cp-mark');
@@ -572,7 +481,7 @@ export function sheetColor(title, initial, onChange, opts = {}) {
           const up = () => {
             el.removeEventListener('pointermove', mv);
             el.removeEventListener('pointerup', up);
-            renderBar();
+            if (!inlineOpen) renderBar();
           };
           el.addEventListener('pointermove', mv);
           el.addEventListener('pointerup', up);
@@ -584,7 +493,7 @@ export function sheetColor(title, initial, onChange, opts = {}) {
       root.querySelectorAll('.sw[data-c]').forEach(b => b.addEventListener('click', () => {
         ({ h, s, v } = hexToHsv(b.dataset.c));
         paint();
-        renderBar();
+        if (!inlineOpen) renderBar();
       }));
       const none = root.querySelector('[data-none]');
       if (none) none.addEventListener('click', () => {
@@ -596,17 +505,22 @@ export function sheetColor(title, initial, onChange, opts = {}) {
         if (!m) { hexIn.value = current; return; }
         ({ h, s, v } = hexToHsv('#' + m[1]));
         paint();
-        renderBar();
+        if (!inlineOpen) renderBar();
+      });
+      root.querySelector('[data-custom]').addEventListener('click', () => {
+        custom = !custom;
+        refreshSheet();
+        requestAnimationFrame(panSelectionIntoView);
       });
       root.querySelector('[data-sample]').addEventListener('click', () => {
         closeSheet();
-        showToast('tap anywhere on the flyer to pick up that color');
+        showToast('tap anywhere on the flyer to pick up that colour');
         sampling = hex => {
           if (!hex) { showToast("couldn't read that pixel"); return; }
           onChange(hex);
           ed.canvas.requestRenderAll();
           markDirty(true);
-          renderBar();
+          if (!inlineOpen) renderBar();
           ({ h, s, v } = hexToHsv(hex));
           current = hex;
           const b2 = build();
@@ -622,6 +536,46 @@ export function sheetColor(title, initial, onChange, opts = {}) {
   const b = build();
   openSheet(title, b.html, b.wire);
   stack[stack.length - 1].rebuild = build;
+}
+
+function sheetStroke(o) {
+  const isLine = o.pKind === 'line';
+  sheetColor(isLine ? 'colour' : 'stroke', o.stroke || '#111110', c => {
+    o.set('stroke', c);
+    if (!o.strokeWidth) o.set('strokeWidth', Math.max(2, Math.round(ed.docW * 0.006)));
+    afterChange();
+    refreshSheet();
+  }, {
+    allowNone: !isLine,
+    onNone: () => { o.set({ stroke: null, strokeWidth: 0 }); afterChange(); },
+  });
+  // fold the width slider in underneath the swatches
+  const cur = stack[stack.length - 1];
+  const inner = cur.rebuild;
+  cur.rebuild = () => {
+    const base = inner();
+    const w = Math.round(o.strokeWidth || 0);
+    return {
+      html: base.html + `
+        <div class="group" style="margin-top:18px">
+          <div class="lbl"><span>thickness</span><span class="val" data-wo>${w}px</span></div>
+          <input type="range" min="0" max="48" value="${w}" data-wi>
+        </div>`,
+      wire: root => {
+        base.wire(root);
+        const wi = root.querySelector('[data-wi]');
+        wi.addEventListener('input', () => {
+          o.set('strokeWidth', +wi.value);
+          if (+wi.value > 0 && !o.stroke) o.set('stroke', '#111110');
+          root.querySelector('[data-wo]').textContent = wi.value + 'px';
+          o.setCoords();
+          ed.canvas.requestRenderAll();
+          markDirty(true);
+        });
+      },
+    };
+  };
+  refreshSheet();
 }
 
 function hexToHsv(hex) {
@@ -683,12 +637,9 @@ async function sheetFont(o) {
       <div class="fsearch"><input placeholder="search fonts…" value="${esc(query)}" data-q></div>
       <div class="fchips">${CATS.map(c =>
         `<button class="chip${c === cat ? ' on' : ''}" data-cat="${c}">${c}</button>`).join('')}</div>
-      <div class="group">
-        <div class="lbl"><span>weight${meta.italics ? ' · style' : ''}</span></div>
-        <div class="seg" data-wseg>
-          ${weights.map(w => `<button data-w="${w}" class="${+o.fontWeight === w ? 'on' : ''}">${w}</button>`).join('')}
-          ${meta.italics ? `<button data-i style="font-style:italic" class="${o.fontStyle === 'italic' ? 'on' : ''}">italic</button>` : ''}
-        </div>
+      <div class="seg" data-wseg>
+        ${weights.map(w => `<button data-w="${w}" class="${+o.fontWeight === w ? 'on' : ''}">${w}</button>`).join('')}
+        ${meta.italics ? `<button data-i style="font-style:italic" class="${o.fontStyle === 'italic' ? 'on' : ''}">italic</button>` : ''}
       </div>
       <div class="flist">${rows.join('') || '<div class="fsect">nothing matches that search</div>'}</div>
       <div class="floadrow">
@@ -718,11 +669,7 @@ async function sheetFont(o) {
         const wb = e.target.closest('[data-w]'), ib = e.target.closest('[data-i]');
         if (wb) o.set('fontWeight', +wb.dataset.w);
         if (ib) o.set('fontStyle', o.fontStyle === 'italic' ? 'normal' : 'italic');
-        if (wb || ib) {
-          ed.canvas.requestRenderAll();
-          markDirty(true);
-          refreshSheet();
-        }
+        if (wb || ib) { ed.canvas.requestRenderAll(); markDirty(true); refreshSheet(); }
       });
       const li = root.querySelector('[data-load]');
       const go = async () => {
@@ -749,13 +696,12 @@ async function sheetFont(o) {
   };
 
   const b = build();
-  openSheet('font', b.html, b.wire);
+  openSheet('font', b.html, b.wire, { tall: true });
   stack[stack.length - 1].rebuild = build;
 }
 
 async function applyFamily(o, family, skipLoad) {
   if (!skipLoad) {
-    // fonts come off the network; say so if it isn't instant
     const slow = setTimeout(() => showToast('loading ' + family + '…', 8000), 350);
     try {
       await loadFont(family);
@@ -765,7 +711,7 @@ async function applyFamily(o, family, skipLoad) {
       return;
     }
     clearTimeout(slow);
-    if ($('#toast').classList.contains('on')) $('#toast').classList.remove('on');
+    $('#toast').classList.remove('on');
   }
   const meta = fontMeta(family);
   const weights = meta.weights || [400];
@@ -780,7 +726,138 @@ async function applyFamily(o, family, skipLoad) {
   ed.canvas.requestRenderAll();
   markDirty(true);
   pushRecentFont(family);
-  renderBar();
+  if (!inlineOpen) renderBar();
+}
+
+/* ================= sheet: adjust (photos) ================= */
+
+function sheetAdjust(o) {
+  const build = () => ({
+    html: `
+      <div class="group"><div class="lbl"><span>flip</span></div>
+        <div class="rowbtns">
+          <button class="pill ghost" data-f="x">horizontal</button>
+          <button class="pill ghost" data-f="y">vertical</button>
+        </div></div>
+      <div class="group">
+        <div class="lbl"><span>rotation</span><span class="val" data-ro>${Math.round(o.angle || 0)}°</span></div>
+        <input type="range" min="-180" max="180" value="${Math.round(o.angle || 0)}" data-rot>
+      </div>
+      <div class="group">
+        <button class="pill ghost" style="width:100%" data-fit>fit to the flyer</button>
+      </div>`,
+    wire: root => {
+      root.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => {
+        o.set(b.dataset.f === 'x' ? 'flipX' : 'flipY', !(b.dataset.f === 'x' ? o.flipX : o.flipY));
+        ed.canvas.requestRenderAll(); markDirty(true);
+      }));
+      const r = root.querySelector('[data-rot]');
+      r.addEventListener('input', () => {
+        o.rotate(+r.value);
+        root.querySelector('[data-ro]').textContent = r.value + '°';
+        ed.canvas.requestRenderAll(); markDirty(true);
+      });
+      root.querySelector('[data-fit]').addEventListener('click', () => {
+        resetImageSize(o);
+        showToast('photo fit to the flyer');
+      });
+    },
+  });
+  const b = build();
+  openSheet('adjust', b.html, b.wire);
+  stack[stack.length - 1].rebuild = build;
+}
+
+/* ================= sheet: more (the long tail) ================= */
+
+function sheetMore(o) {
+  const isText = o.pKind === 'text';
+  const build = () => {
+    const op = Math.round((o.opacity ?? 1) * 100);
+    const textBits = isText ? `
+      <div class="group"><div class="lbl"><span>align</span></div>
+        <div class="seg" data-align>${['left', 'centre', 'right'].map((a, i) => {
+          const v = ['left', 'center', 'right'][i];
+          return `<button data-v="${v}" class="${o.textAlign === v ? 'on' : ''}">${a}</button>`;
+        }).join('')}</div></div>
+      <div class="group">
+        <div class="lbl"><span>line height</span><span class="val" data-lho>${(o.lineHeight ?? 1.16).toFixed(2)}</span></div>
+        <input type="range" min="70" max="220" value="${Math.round((o.lineHeight ?? 1.16) * 100)}" data-lh>
+      </div>
+      <div class="group">
+        <div class="lbl"><span>letter spacing</span><span class="val" data-lso>${((o.charSpacing || 0) / 1000).toFixed(2)}em</span></div>
+        <input type="range" min="-60" max="500" value="${o.charSpacing || 0}" data-ls>
+      </div>
+      <div class="group">
+        <div class="rowbtns">
+          <button class="pill ghost" data-pos="cx">centre across</button>
+          <button class="pill ghost" data-pos="cy">centre down</button>
+        </div>
+      </div>
+      <div class="sheet-div"></div>` : '';
+
+    const html = `${textBits}
+      <div class="group">
+        <div class="lbl"><span>opacity</span><span class="val" data-opo>${op}%</span></div>
+        <input type="range" min="0" max="100" value="${op}" data-op>
+      </div>
+      <button class="srow" data-m="fwd">${I.fwd}bring forward</button>
+      <button class="srow" data-m="back">${I.back}send backward</button>
+      <button class="srow" data-m="dup">${I.dup}duplicate</button>
+      <button class="srow" data-m="lock">${o.pLocked ? I.unlock : I.lock}${o.pLocked ? 'unlock' : 'lock'}</button>
+      <button class="srow" data-m="layers">${I.layers}all layers…</button>
+      <button class="srow danger" data-m="del">${I.del}delete</button>`;
+
+    const wire = root => {
+      const op2 = root.querySelector('[data-op]');
+      op2.addEventListener('input', () => {
+        o.set('opacity', op2.value / 100);
+        root.querySelector('[data-opo]').textContent = op2.value + '%';
+        ed.canvas.requestRenderAll(); markDirty(true);
+      });
+      const al = root.querySelector('[data-align]');
+      if (al) al.addEventListener('click', e => {
+        const b = e.target.closest('[data-v]');
+        if (!b) return;
+        o.set('textAlign', b.dataset.v);
+        root.querySelectorAll('[data-v]').forEach(x => x.classList.toggle('on', x === b));
+        ed.canvas.requestRenderAll(); markDirty(true);
+      });
+      const lh = root.querySelector('[data-lh]');
+      if (lh) lh.addEventListener('input', () => {
+        o.set('lineHeight', lh.value / 100);
+        root.querySelector('[data-lho]').textContent = (lh.value / 100).toFixed(2);
+        ed.canvas.requestRenderAll(); markDirty(true);
+      });
+      const ls = root.querySelector('[data-ls]');
+      if (ls) ls.addEventListener('input', () => {
+        o.set('charSpacing', +ls.value);
+        root.querySelector('[data-lso]').textContent = (ls.value / 1000).toFixed(2) + 'em';
+        ed.canvas.requestRenderAll(); markDirty(true);
+      });
+      root.querySelectorAll('[data-pos]').forEach(b => b.addEventListener('click', () => {
+        const r = o.getBoundingRect();
+        if (b.dataset.pos === 'cx') o.set('left', o.left + (ed.docW - r.width) / 2 - r.left);
+        else o.set('top', o.top + (ed.docH - r.height) / 2 - r.top);
+        o.setCoords();
+        ed.canvas.requestRenderAll(); markDirty(true);
+      }));
+      root.querySelectorAll('[data-m]').forEach(b => b.addEventListener('click', () => {
+        const m = b.dataset.m;
+        if (m === 'layers') { sheetLayers(); return; }
+        if (m === 'dup') duplicateObject(o);
+        if (m === 'fwd') reorder(o, 'forward');
+        if (m === 'back') reorder(o, 'backward');
+        if (m === 'lock') setLocked(o, !o.pLocked);
+        if (m === 'del') deleteObject(o);
+        closeSheet();
+      }));
+    };
+    return { html, wire };
+  };
+  const b = build();
+  openSheet('more', b.html, b.wire);
+  stack[stack.length - 1].rebuild = build;
 }
 
 /* ================= sheet: layers ================= */
@@ -813,24 +890,23 @@ function sheetLayers() {
           <span class="lname" data-name>${esc(layerName(o))}</span>
         </button>
         <span class="lacts">
-          <button class="icon-btn" data-up ${i === 0 ? 'disabled' : ''} title="up">${I.fwd}</button>
-          <button class="icon-btn" data-down ${i === objs.length - 1 ? 'disabled' : ''} title="down">${I.back}</button>
+          <button class="icon-btn" data-up ${i === 0 ? 'disabled' : ''}>${I.fwd}</button>
+          <button class="icon-btn" data-down ${i === objs.length - 1 ? 'disabled' : ''}>${I.back}</button>
           <button class="icon-btn ${o.visible ? 'act-on' : ''}" data-eye>${o.visible ? I.eye : I.eyeOff}</button>
           <button class="icon-btn ${o.pLocked ? 'act-on' : ''}" data-lock>${o.pLocked ? I.lock : I.unlock}</button>
         </span>
       </div>`).join('');
 
-    const html = (objs.length ? rows : '<p class="hint" style="padding:14px 8px">nothing on the flyer yet.</p>') + `
-      <div class="lrow" style="opacity:.6">
+    // the background lives in the canvas sheet — this row just points there
+    const html = (objs.length ? rows : '<p class="hint" style="padding:14px 8px">nothing on your flyer yet.</p>') + `
+      <button class="lrow" data-bgrow style="width:100%">
         <span class="lpick" style="pointer-events:none">
           <span class="lbl" style="width:12px;text-align:center">□</span>
           <span class="thumb" style="background:${ed.bgRect ? ed.bgRect.fill : '#fff'}"></span>
           <span class="lname">background</span>
         </span>
-      </div>
-      <div class="group" style="margin-top:16px">
-        <button class="pill ghost" style="width:100%" data-bg>change background color</button>
-      </div>`;
+        <span class="lbl" style="padding-right:8px">canvas ›</span>
+      </button>`;
 
     const wire = root => {
       root.querySelectorAll('.lrow[data-i]').forEach(row => {
@@ -857,9 +933,7 @@ function sheetLayers() {
           input.addEventListener('keydown', ev => { if (ev.key === 'Enter') input.blur(); });
         });
       });
-      root.querySelector('[data-bg]').addEventListener('click', () => {
-        sheetColor('background', ed.bgRect ? ed.bgRect.fill : '#ffffff', c => setBg(c));
-      });
+      root.querySelector('[data-bgrow]').addEventListener('click', sheetCanvas);
     };
     return { html, wire };
   };
@@ -874,15 +948,22 @@ function sheetLayers() {
 function sheetCanvas() {
   const build = () => {
     const cur = PRESETS.find(p => p.w === ed.docW && p.h === ed.docH);
-    const curSwap = PRESETS.find(p => p.w === ed.docH && p.h === ed.docW);
     const html = `
+      <div class="group">
+        <div class="lbl"><span>background</span></div>
+        <div class="swatches" data-bgsw>
+          ${[...new Set([ed.bgRect ? ed.bgRect.fill : '#ffffff', '#ffffff', '#f8f7f4', '#111110', '#22423b', '#cc3333'])]
+            .map(c => `<button class="sw${c === (ed.bgRect && ed.bgRect.fill) ? ' cur' : ''}" data-c="${c}" style="background:${c}"></button>`).join('')}
+          <button class="sw add" data-bgmore>+</button>
+        </div>
+      </div>
       <div class="group">
         <div class="lbl"><span>size</span></div>
         ${PRESETS.map(p => `
           <button class="preset${cur && cur.key === p.key ? ' on' : ''}" data-preset="${p.key}">
             <span class="radio"></span>${p.label}<span class="dim">${p.w} × ${p.h}</span>
           </button>`).join('')}
-        <button class="preset${cur ? '' : ' on'}" data-custom>
+        <button class="preset${cur ? '' : ' on'}">
           <span class="radio"></span>custom<span class="dim">${ed.docW} × ${ed.docH}</span>
         </button>
         <div class="wh">
@@ -890,14 +971,8 @@ function sheetCanvas() {
           <label class="field">h<input id="inH" type="number" inputmode="numeric" value="${ed.docH}"></label>
         </div>
         <div class="rowbtns" style="margin-top:12px">
-          <button class="pill ghost" data-swap>${curSwap || cur ? 'swap orientation' : 'swap w / h'}</button>
+          <button class="pill ghost" data-swap>swap orientation</button>
         </div>
-      </div>
-      <div class="group">
-        <div class="lbl"><span>background</span></div>
-        <button class="pill ghost" style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px" data-bg>
-          <span class="act-dot" style="background:${ed.bgRect ? ed.bgRect.fill : '#fff'}"></span>background color
-        </button>
       </div>`;
     const wire = root => {
       root.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => {
@@ -907,10 +982,12 @@ function sheetCanvas() {
       const w = root.querySelector('#inW'), h = root.querySelector('#inH');
       w.addEventListener('change', () => { resizeDoc(+w.value, ed.docH); refreshSheet(); });
       h.addEventListener('change', () => { resizeDoc(ed.docW, +h.value); refreshSheet(); });
-      root.querySelector('[data-swap]').addEventListener('click', () => {
-        resizeDoc(ed.docH, ed.docW); refreshSheet();
-      });
-      root.querySelector('[data-bg]').addEventListener('click', () => {
+      root.querySelector('[data-swap]').addEventListener('click', () => { resizeDoc(ed.docH, ed.docW); refreshSheet(); });
+      root.querySelectorAll('[data-bgsw] [data-c]').forEach(b => b.addEventListener('click', () => {
+        setBg(b.dataset.c);
+        refreshSheet();
+      }));
+      root.querySelector('[data-bgmore]').addEventListener('click', () => {
         sheetColor('background', ed.bgRect ? ed.bgRect.fill : '#ffffff', c => setBg(c));
       });
     };
@@ -969,5 +1046,3 @@ export function sheetExport() {
   openSheet('export', b.html, b.wire, { push: false });
   stack[stack.length - 1].rebuild = build;
 }
-
-export { renderBar };

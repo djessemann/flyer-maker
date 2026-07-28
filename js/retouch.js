@@ -5,6 +5,7 @@ import { swapImageSource } from './editor.js';
 import { showToast } from './ui.js';
 
 const $ = s => document.querySelector(s);
+const HINT = 'paint over what you want gone, then tap “erase it”';
 
 let worker = null, ready = null;
 let obj = null;          // fabric image being worked on
@@ -78,7 +79,7 @@ function open(image) {
   history = [];
 
   $('#retouch').classList.add('on');
-  $('#rtHint').textContent = 'paint over what you want gone';
+  $('#rtHint').textContent = HINT;
   $('#rtGo').disabled = false;
   layout();
   ensureWorker().catch(err => showToast('erase engine problem: ' + err.message));
@@ -232,10 +233,10 @@ async function run() {
     const png = obj.srcFormat === 'png';
     const url = png ? native.toDataURL('image/png') : native.toDataURL('image/jpeg', 0.92);
     await swapImageSource(obj, url);
-    $('#rtHint').textContent = 'gone — paint again for another pass';
+    $('#rtHint').textContent = 'gone. paint over anything else you want removed.';
     showToast('erased');
   } catch (err) {
-    $('#rtHint').textContent = 'paint over what you want gone';
+    $('#rtHint').textContent = HINT;
     showToast('erase failed: ' + (err.message || err));
   }
 
