@@ -1,10 +1,10 @@
-// google fonts: curated manifest picker + load-any-by-name. no api key.
+// google fonts: curated manifest + load-any-by-name. no api key, no build step.
 import { getSettings, patchSettings } from './store.js';
 
 let manifest = { families: [] };
-const extras = [];          // families loaded by name this session
-const loaded = new Map();   // family -> Promise
-let specimensRequested = false;
+const extras = [];            // families pulled in by name this session
+const loaded = new Map();     // family -> promise
+let specimensDone = false;
 
 export async function initFonts() {
   try {
@@ -12,69 +12,94 @@ export async function initFonts() {
   } catch {
     manifest = { families: [] };
   }
+  try {
+    const s = await getSettings();
+    (s.extraFonts || []).forEach(f => {
+      if (!extras.find(x => x.family === f)) {
+        extras.push({ family: f, category: 'loaded', weights: [400], italics: false });
+      }
+    });
+  } catch {}
 }
 
+export const allFamilies = () => [...manifest.families, ...extras];
+
 export function fontMeta(family) {
-  return manifest.families.find(f => f.family === family)
-    || extras.find(f => f.family === family)
+  return allFamilies().find(f => f.family === family)
     || { family, category: 'loaded', weights: [400], italics: false };
 }
 
+export async function recentFonts() {
+  const s = await getSettings();
+  return s.recentFonts || [];
+}
+
+export async function pushRecentFont(family) {
+  const cur = await recentFonts();
+  await patchSettings({ recentFonts: [family, ...cur.filter(f => f !== family)].slice(0, 8) });
+}
+
 function css2Url(fam) {
-  const f = encodeURIComponent(fam.family).replace(/%20/g, '+');
+  const name = encodeURIComponent(fam.family).replace(/%20/g, '+');
   const w = fam.weights && fam.weights.length ? fam.weights : [400];
-  const axis = fam.italics
-    ? `:ital,wght@${w.map(x => '0,' + x).join(';')};${w.map(x => '1,' + x).join(';')}`
-    : (w.length === 1 && w[0] === 400 ? '' : `:wght@${w.join(';')}`);
-  return `https://fonts.googleapis.com/css2?family=${f}${axis}&display=swap`;
+  let axis = '';
+  if (fam.italics) {
+    axis = `:ital,wght@${w.map(x => '0,' + x).join(';')};${w.map(x => '1,' + x).join(';')}`;
+  } else if (!(w.length === 1 && w[0] === 400)) {
+    axis = `:wght@${w.join(';')}`;
+  }
+  return `https://fonts.googleapis.com/css2?family=${name}${axis}&display=swap`;
 }
 
 function injectLink(href) {
-  if (document.querySelector(`link[href="${CSS.escape(href)}"]`)) return;
+  if (document.querySelector(`link[data-font="${href}"]`)) return;
   const l = document.createElement('link');
   l.rel = 'stylesheet';
   l.href = href;
+  l.dataset.font = href;
   document.head.appendChild(l);
 }
 
-// load a family's full axis set; resolves when usable (rejects if it never becomes usable)
+// resolves once the family is actually usable for rendering
 export function loadFont(family) {
+  if (family === 'DM Mono') return Promise.resolve(family);
   if (loaded.has(family)) return loaded.get(family);
   const fam = fontMeta(family);
   const p = (async () => {
     injectLink(css2Url(fam));
-    const probes = (fam.weights || [400]).map(w => `${w} 1rem "${family}"`);
-    const deadline = Date.now() + 6000;
+    const probe = `${(fam.weights || [400])[0]} 1rem "${family}"`;
+    const deadline = Date.now() + 8000;
     while (Date.now() < deadline) {
-      try { await Promise.all(probes.map(pr => document.fonts.load(pr))); } catch {}
-      if (document.fonts.check(probes[0])) return family;
-      await new Promise(r => setTimeout(r, 150));
+      try {
+        // resolves with the faces that actually loaded — [] means not available yet
+        const faces = await document.fonts.load(probe);
+        if (faces.length || document.fonts.check(probe)) return family;
+      } catch {}
+      await new Promise(r => setTimeout(r, 120));
     }
-    throw new Error('font not available: ' + family);
+    throw new Error('unavailable');
   })();
   loaded.set(family, p);
   p.catch(() => loaded.delete(family));
   return p;
 }
 
-// specimens: subset css requests so the picker list renders each row in its own face.
-// chunked so one odd family can't 400 the whole batch.
-function loadSpecimens() {
-  if (specimensRequested) return;
-  specimensRequested = true;
+// specimen css so each row in the browser renders in its own face
+export function loadSpecimens() {
+  if (specimensDone) return;
+  specimensDone = true;
   const fams = manifest.families;
-  const chars = [...new Set(fams.map(f => f.family).join(''))].join('');
+  const chars = [...new Set(fams.map(f => f.family).join('') + 'Aa')].join('');
   for (let i = 0; i < fams.length; i += 8) {
-    const chunk = fams.slice(i, i + 8);
-    const q = chunk.map(f => 'family=' + encodeURIComponent(f.family).replace(/%20/g, '+')).join('&');
+    const q = fams.slice(i, i + 8)
+      .map(f => 'family=' + encodeURIComponent(f.family).replace(/%20/g, '+')).join('&');
     injectLink(`https://fonts.googleapis.com/css2?${q}&text=${encodeURIComponent(chars)}&display=swap`);
   }
 }
 
-// try to load an arbitrary family typed by the user (default style only)
-export async function loadByName(name) {
-  const family = name.trim().replace(/\s+/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+// pull an arbitrary family straight off google fonts by name
+export async function loadByName(input) {
+  const family = input.trim().replace(/\s+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   if (!family) throw new Error('empty');
   const href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family).replace(/%20/g, '+')}&display=swap`;
   const res = await fetch(href).catch(() => null);
@@ -84,94 +109,21 @@ export async function loadByName(name) {
   const style = document.createElement('style');
   style.textContent = css;
   document.head.appendChild(style);
-  await document.fonts.load(`1rem "${family}"`);
+  try { await document.fonts.load(`1rem "${family}"`); } catch {}
   if (!document.fonts.check(`1rem "${family}"`)) throw new Error('not found');
-  if (!fontMeta(family) || !manifest.families.find(f => f.family === family)) {
-    if (!extras.find(f => f.family === family)) {
-      extras.push({ family, category: 'loaded', weights: [400], italics: false });
-    }
+  if (!extras.find(f => f.family === family) && !manifest.families.find(f => f.family === family)) {
+    extras.push({ family, category: 'loaded', weights: [400], italics: false });
+    const s = await getSettings();
+    await patchSettings({ extraFonts: [...new Set([...(s.extraFonts || []), family])].slice(0, 40) });
   }
   loaded.set(family, Promise.resolve(family));
   return family;
 }
 
-// make sure every font a document uses is loaded before render; returns families that failed
+// make sure a reopened document's fonts are ready; returns the ones that failed
 export async function ensureDocFonts(fonts) {
-  const fams = [...new Set((fonts || []).map(f => typeof f === 'string' ? f : f.family))];
-  const results = await Promise.allSettled(fams.map(f => loadFont(f)));
-  return fams.filter((f, i) => results[i].status === 'rejected');
-}
-
-/* ---------- picker ui ---------- */
-
-const CATS = ['all', 'display', 'serif', 'sans', 'mono', 'script'];
-
-// opens the font picker popover. onPick(family) fires when a family is chosen.
-export async function openFontPicker(pop, current, onPick) {
-  loadSpecimens();
-  const settings = await getSettings();
-  const recents = settings.recentFonts || [];
-  let cat = 'all', query = '';
-
-  pop.innerHTML = `
-    <div class="pop-head">font<button class="icon-btn" data-x><svg width="13" height="13" viewBox="0 0 14 14"><path d="M3 3 L11 11 M11 3 L3 11"/></svg></button></div>
-    <input class="fp-search" placeholder="search google fonts…">
-    <div class="fp-chips">${CATS.map(c => `<button class="chip2${c === 'all' ? ' on' : ''}" data-cat="${c}">${c}</button>`).join('')}</div>
-    <div class="fp-list"></div>
-    <div class="fp-load"><input placeholder="load any google font by name…"><button data-go>load</button></div>`;
-
-  const list = pop.querySelector('.fp-list');
-
-  const render = () => {
-    const all = [...manifest.families, ...extras];
-    const match = f =>
-      (cat === 'all' || f.category === cat) &&
-      (!query || f.family.toLowerCase().includes(query));
-    const rows = [];
-    const rec = recents.map(r => all.find(f => f.family === r)).filter(f => f && match(f));
-    if (rec.length && !query && cat === 'all') {
-      rows.push(`<div class="fp-sect">recent</div>`);
-      rows.push(...rec.map(f => rowHtml(f)));
-      rows.push(`<div class="fp-sect">all fonts</div>`);
-    }
-    rows.push(...all.filter(match).map(f => rowHtml(f)));
-    list.innerHTML = rows.join('') || `<div class="fp-sect">nothing matches</div>`;
-  };
-  const rowHtml = f =>
-    `<button class="frow" data-fam="${f.family}" style="font-family:'${f.family}',var(--mono)">${f.family}${f.family === current ? '<span class="fchk">✓</span>' : ''}</button>`;
-  render();
-
-  const search = pop.querySelector('.fp-search');
-  search.addEventListener('input', () => { query = search.value.trim().toLowerCase(); render(); });
-  pop.querySelector('.fp-chips').addEventListener('click', e => {
-    const b = e.target.closest('[data-cat]');
-    if (!b) return;
-    cat = b.dataset.cat;
-    pop.querySelectorAll('.chip2').forEach(c => c.classList.toggle('on', c === b));
-    render();
-  });
-  list.addEventListener('click', async e => {
-    const b = e.target.closest('[data-fam]');
-    if (!b) return;
-    const family = b.dataset.fam;
-    const next = [family, ...recents.filter(r => r !== family)].slice(0, 6);
-    patchSettings({ recentFonts: next });
-    onPick(family);
-  });
-  const loadInput = pop.querySelector('.fp-load input');
-  const doLoad = async () => {
-    const name = loadInput.value;
-    if (!name.trim()) return;
-    loadInput.disabled = true;
-    try {
-      const family = await loadByName(name);
-      onPick(family);
-    } catch {
-      const { showToast } = await import('./panels.js');
-      showToast("couldn't find that font on google fonts");
-    }
-    loadInput.disabled = false;
-  };
-  pop.querySelector('[data-go]').addEventListener('click', doLoad);
-  loadInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLoad(); });
+  const fams = [...new Set((fonts || []).map(f => (typeof f === 'string' ? f : f.family)))]
+    .filter(f => f && f !== 'DM Mono');
+  const res = await Promise.allSettled(fams.map(f => loadFont(f)));
+  return fams.filter((f, i) => res[i].status === 'rejected');
 }

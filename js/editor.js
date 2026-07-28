@@ -1,4 +1,4 @@
-// canvas engine: fabric setup, tools, gestures, zoom/pan, undo/redo, autosave, export
+// canvas engine: fabric setup, gestures, zoom/pan, undo/redo, autosave, export
 import * as fabric from 'https://cdn.jsdelivr.net/npm/fabric@6.9.1/dist/index.min.mjs';
 import { emit } from './bus.js';
 import { saveProject, newId } from './store.js';
@@ -7,23 +7,25 @@ import { ensureDocFonts } from './fonts.js';
 export { fabric };
 
 const PROPS = ['pName', 'pLocked', 'pKind', 'srcFormat', 'selectable', 'evented', 'rx', 'ry'];
-const ZMIN = 0.1, ZMAX = 8;
+const ZMIN = 0.05, ZMAX = 8;
+
 export const PRESETS = [
-  { key: 'ig-post', label: 'ig post', w: 1080, h: 1080 },
-  { key: 'ig-story', label: 'ig story', w: 1080, h: 1920 },
+  { key: 'ig-post', label: 'instagram post', w: 1080, h: 1080 },
+  { key: 'ig-story', label: 'instagram story', w: 1080, h: 1920 },
   { key: 'letter', label: 'flyer · letter', w: 1275, h: 1650 },
   { key: 'a4', label: 'a4', w: 1240, h: 1754 },
+  { key: 'poster', label: 'poster · tabloid', w: 1650, h: 2550 },
 ];
 
 export const ed = {
   canvas: null, id: null, name: 'untitled flyer',
   docW: 1080, docH: 1350, bgRect: null,
-  tool: 'move', pendingShape: null,
   undoStack: [], redoStack: [], restoring: false,
   exportScale: 2, open: false,
 };
 
 let dirtyTimer = null, snapTimer = null, host = null;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 /* ---------- init ---------- */
 
@@ -32,20 +34,21 @@ export function initEditor() {
     borderColor: '#111110',
     cornerColor: '#F8F7F4',
     cornerStrokeColor: '#111110',
-    cornerSize: 10,
+    cornerSize: 11,
     touchCornerSize: 44,
     transparentCorners: false,
     borderScaleFactor: 1.5,
     borderOpacityWhenMoving: 0.6,
     editingBorderColor: '#111110',
     cursorColor: '#111110',
+    padding: 2,
   });
 
   host = document.querySelector('.canvas-host');
   const canvas = new fabric.Canvas('fab', {
-    selection: false,               // no marquee in v1 — touch-first
+    selection: false,
     preserveObjectStacking: true,
-    uniformScaling: true,           // corner drag keeps aspect
+    uniformScaling: true,
     stopContextMenu: true,
     fireRightClick: false,
     backgroundColor: '',
@@ -54,14 +57,16 @@ export function initEditor() {
   sizeToHost();
   new ResizeObserver(() => { sizeToHost(); if (ed.open) fit(); }).observe(host);
 
-  canvas.on('mouse:down', onMouseDown);
+  canvas.on('mouse:down', opt => {
+    if (!opt.target) { canvas.discardActiveObject(); canvas.requestRenderAll(); }
+  });
   canvas.on('selection:created', () => emit('selection'));
   canvas.on('selection:updated', () => emit('selection'));
   canvas.on('selection:cleared', () => emit('selection'));
-  canvas.on('object:modified', e => { bakeScale(e.target); markDirty(true); });
+  canvas.on('object:modified', e => { bakeScale(e.target); markDirty(true); emit('selection'); });
   canvas.on('object:added', e => { if (!ed.restoring) styleControls(e.target); });
   canvas.on('text:changed', () => { emit('layers'); markDirty(true); });
-  canvas.on('text:editing:exited', () => markDirty(true));
+  canvas.on('text:editing:exited', () => { markDirty(true); emit('layers'); });
 
   wireGestures(canvas);
   return canvas;
@@ -76,7 +81,7 @@ function sizeToHost() {
 function styleControls(obj) {
   if (!obj || !obj.controls || !obj.controls.mtr) return;
   obj.controls.mtr.y = 0.5;
-  obj.controls.mtr.offsetY = 34;
+  obj.controls.mtr.offsetY = 36;
   obj.controls.mtr.withConnection = true;
 }
 
@@ -103,7 +108,6 @@ export async function openDoc(id, doc) {
   const canvas = ed.canvas;
   ed.restoring = true;
   const missing = await ensureDocFonts(doc.fonts);
-  if (missing.length) emit('toast', `offline? couldn't load: ${missing.join(', ')}`);
   ed.id = id;
   ed.name = doc.name || 'untitled flyer';
   ed.docW = doc.canvas.w; ed.docH = doc.canvas.h;
@@ -114,6 +118,7 @@ export async function openDoc(id, doc) {
   fit();
   pushSnapshot();
   emit('doc:open'); emit('layers'); emit('selection');
+  if (missing.length) emit('toast', `couldn't load ${missing.join(', ')} — check your connection`);
 }
 
 export function closeDoc() {
@@ -124,13 +129,12 @@ export function closeDoc() {
 }
 
 function makeBg(fill) {
-  const r = new fabric.Rect({
+  return new fabric.Rect({
     left: 0, top: 0, width: ed.docW, height: ed.docH, fill,
     selectable: false, evented: false, hoverCursor: 'default',
     pKind: 'bg', pName: 'background', pLocked: true,
     shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.18)', blur: 40, offsetY: 14 }),
   });
-  return r;
 }
 
 function afterRestore() {
@@ -157,8 +161,7 @@ function afterRestore() {
 export function docFonts() {
   const seen = new Map();
   ed.canvas.getObjects().forEach(o => {
-    if (o.fontFamily) seen.set(o.fontFamily + '|' + (o.fontWeight || 400),
-      { family: o.fontFamily, weight: o.fontWeight || 400 });
+    if (o.fontFamily) seen.set(o.fontFamily, { family: o.fontFamily, weight: o.fontWeight || 400 });
   });
   return [...seen.values()];
 }
@@ -195,9 +198,7 @@ export async function flushSave() {
 
 /* ---------- undo / redo ---------- */
 
-function snapshotState() {
-  return { fabric: ed.canvas.toObject(PROPS), w: ed.docW, h: ed.docH };
-}
+const snapshotState = () => ({ fabric: ed.canvas.toObject(PROPS), w: ed.docW, h: ed.docH });
 
 export function pushSnapshot() {
   if (ed.restoring) return;
@@ -243,12 +244,17 @@ async function restore(s) {
 
 /* ---------- zoom / pan ---------- */
 
-export function zoomLevel() { return ed.canvas.viewportTransform[0]; }
+export const zoomLevel = () => ed.canvas.viewportTransform[0];
+
+function fitZoom() {
+  const canvas = ed.canvas;
+  const pad = canvas.width < 700 ? 30 : 70;
+  return clamp(Math.min((canvas.width - pad) / ed.docW, (canvas.height - pad) / ed.docH), ZMIN, ZMAX);
+}
 
 export function fit() {
   const canvas = ed.canvas;
-  const pad = canvas.width < 700 ? 36 : 80;
-  const z = clamp(Math.min((canvas.width - pad) / ed.docW, (canvas.height - pad) / ed.docH), ZMIN, ZMAX);
+  const z = fitZoom();
   canvas.setViewportTransform([z, 0, 0, z,
     (canvas.width - ed.docW * z) / 2, (canvas.height - ed.docH * z) / 2]);
   canvas.requestRenderAll();
@@ -256,13 +262,9 @@ export function fit() {
 }
 
 export function cycleZoom() {
-  const z = zoomLevel();
   const canvas = ed.canvas;
-  const pad = canvas.width < 700 ? 36 : 80;
-  const fitZ = Math.min((canvas.width - pad) / ed.docW, (canvas.height - pad) / ed.docH);
-  if (Math.abs(z - fitZ) < 0.01) {
-    const c = new fabric.Point(canvas.width / 2, canvas.height / 2);
-    canvas.zoomToPoint(c, 1);
+  if (Math.abs(zoomLevel() - fitZoom()) < 0.01) {
+    canvas.zoomToPoint(new fabric.Point(canvas.width / 2, canvas.height / 2), 1);
     canvas.requestRenderAll();
     emit('zoom');
   } else {
@@ -285,10 +287,10 @@ function wireGestures(canvas) {
   el.addEventListener('touchstart', e => {
     if (e.touches.length === 2) {
       e.preventDefault();
-      canvas._currentTransform = null;   // abort any in-progress object drag
+      canvas._currentTransform = null;
       canvas.skipTargetFind = true;
       const p = pts(e.touches);
-      g = { d0: dist(p), m0: local(mid(p)), vpt: [...canvas.viewportTransform] };
+      g = { d0: dist(p) || 1, m0: local(mid(p)), vpt: [...canvas.viewportTransform] };
     }
   }, { passive: false });
 
@@ -307,10 +309,7 @@ function wireGestures(canvas) {
   }, { passive: false });
 
   const end = e => {
-    if (g && e.touches.length < 2) {
-      g = null;
-      canvas.skipTargetFind = false;
-    }
+    if (g && e.touches.length < 2) { g = null; canvas.skipTargetFind = false; }
   };
   el.addEventListener('touchend', end);
   el.addEventListener('touchcancel', end);
@@ -331,35 +330,6 @@ function wireGestures(canvas) {
   }, { passive: false });
 }
 
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
-/* ---------- tools ---------- */
-
-export function setTool(tool) {
-  ed.tool = tool;
-  if (tool !== 'shape') ed.pendingShape = null;
-  emit('tool', tool);
-}
-
-function onMouseDown(opt) {
-  const canvas = ed.canvas;
-  const p = canvas.getScenePoint(opt.e);
-  if (ed.tool === 'text') {
-    addTextAt(p);
-    setTool('move');
-    return;
-  }
-  if (ed.tool === 'shape' && ed.pendingShape) {
-    addShapeAt(ed.pendingShape, p);
-    setTool('move');
-    return;
-  }
-  if (!opt.target) {
-    canvas.discardActiveObject();
-    canvas.requestRenderAll();
-  }
-}
-
 /* ---------- objects ---------- */
 
 function autoName(kind) {
@@ -373,16 +343,27 @@ export function layerName(o) {
   if (o.pName) return o.pName;
   if (o.text != null) {
     const t = o.text.replace(/\s+/g, ' ').trim();
-    return t ? (t.length > 14 ? t.slice(0, 14) + '…' : t) : 'text';
+    return t ? (t.length > 16 ? t.slice(0, 16) + '…' : t) : 'text';
   }
   return 'layer';
 }
 
-export function addTextAt(p) {
-  const tb = new fabric.Textbox('type…', {
-    left: p.x - 130, top: p.y - 30, width: 260,
-    fontSize: 48, fontFamily: 'DM Mono', fontWeight: 400, fill: '#111110',
-    pKind: 'text',
+// place near the middle of the artboard, nudged down as the stack grows
+function spot() {
+  const n = ed.canvas.getObjects().filter(o => o.pKind !== 'bg').length;
+  const off = (n % 6) * Math.round(ed.docH * 0.035);
+  return { x: ed.docW / 2, y: ed.docH / 2 + off - ed.docH * 0.09 };
+}
+
+export function addText() {
+  const p = spot();
+  const w = Math.round(ed.docW * 0.76);
+  const size = Math.round(ed.docW / 12);
+  const tb = new fabric.Textbox('your text', {
+    left: p.x - w / 2, top: p.y - size,
+    width: w, fontSize: size,
+    fontFamily: 'DM Mono', fontWeight: 400, fill: '#111110',
+    textAlign: 'center', pKind: 'text',
   });
   ed.canvas.add(tb);
   ed.canvas.setActiveObject(tb);
@@ -391,35 +372,31 @@ export function addTextAt(p) {
   tb.enterEditing();
   tb.selectAll();
   pushSnapshot(); markDirty();
-  emit('layers');
+  emit('layers'); emit('selection');
   return tb;
 }
 
-export function armShape(kind) {
-  ed.pendingShape = kind;
-  ed.tool = 'shape';
-  emit('tool', 'shape');
-}
-
-export function addShapeAt(kind, p) {
-  let obj;
+export function addShape(kind) {
+  const p = spot();
+  const s = Math.round(Math.min(ed.docW, ed.docH) * 0.32);
   const common = { fill: '#111110', stroke: null, strokeWidth: 0, strokeUniform: true };
-  if (kind === 'rect') obj = new fabric.Rect({ ...common, left: p.x - 120, top: p.y - 120, width: 240, height: 240 });
-  if (kind === 'rounded') obj = new fabric.Rect({ ...common, left: p.x - 120, top: p.y - 120, width: 240, height: 240, rx: 28, ry: 28 });
-  if (kind === 'ellipse') obj = new fabric.Ellipse({ ...common, left: p.x - 120, top: p.y - 120, rx: 120, ry: 120 });
-  if (kind === 'line') obj = new fabric.Line([p.x - 120, p.y, p.x + 120, p.y], { stroke: '#111110', strokeWidth: 6, strokeUniform: true });
-  if (!obj) return;
+  let obj;
+  if (kind === 'rect') obj = new fabric.Rect({ ...common, left: p.x - s / 2, top: p.y - s / 2, width: s, height: s });
+  if (kind === 'rounded') obj = new fabric.Rect({ ...common, left: p.x - s / 2, top: p.y - s / 2, width: s, height: s, rx: Math.round(s * 0.12), ry: Math.round(s * 0.12) });
+  if (kind === 'ellipse') obj = new fabric.Ellipse({ ...common, left: p.x - s / 2, top: p.y - s / 2, rx: s / 2, ry: s / 2 });
+  if (kind === 'line') obj = new fabric.Line([p.x - s / 2, p.y, p.x + s / 2, p.y], { stroke: '#111110', strokeWidth: Math.max(4, Math.round(s * 0.03)), strokeUniform: true });
+  if (!obj) return null;
   obj.set({ pKind: kind, pName: autoName(kind) });
   ed.canvas.add(obj);
   ed.canvas.setActiveObject(obj);
   styleControls(obj);
   ed.canvas.requestRenderAll();
   pushSnapshot(); markDirty();
-  emit('layers');
+  emit('layers'); emit('selection');
   return obj;
 }
 
-// file → dataURL, downscaled to <=4096 on the long side. returns {url, format, scaled}
+// decode + downscale to <=4096 on the long side (safari canvas memory ceiling)
 export async function fileToDataURL(file) {
   let bmp = null;
   try {
@@ -428,12 +405,13 @@ export async function fileToDataURL(file) {
     bmp = await new Promise((res, rej) => {
       const u = URL.createObjectURL(file);
       const img = new Image();
-      img.onload = () => res(img);
+      img.onload = () => { res(img); };
       img.onerror = () => { URL.revokeObjectURL(u); rej(new Error('decode failed')); };
       img.src = u;
     });
   }
   const w = bmp.width || bmp.naturalWidth, h = bmp.height || bmp.naturalHeight;
+  if (!w || !h) throw new Error('decode failed');
   const long = Math.max(w, h);
   const k = long > 4096 ? 4096 / long : 1;
   const c = document.createElement('canvas');
@@ -453,10 +431,10 @@ export async function addImageFromFile(file) {
   try {
     data = await fileToDataURL(file);
   } catch {
-    emit('toast', "couldn't read that image — try jpeg or png");
+    emit('toast', "couldn't read that photo — try a jpeg or png");
     return null;
   }
-  if (data.scaled) emit('toast', 'large photo downscaled to 4096px');
+  if (data.scaled) emit('toast', 'large photo scaled down to 4096px');
   const img = await fabric.FabricImage.fromURL(data.url);
   const s = Math.min(ed.docW / img.width, ed.docH / img.height);
   img.set({
@@ -470,7 +448,7 @@ export async function addImageFromFile(file) {
   styleControls(img);
   ed.canvas.requestRenderAll();
   pushSnapshot(); markDirty();
-  emit('layers');
+  emit('layers'); emit('selection');
   return img;
 }
 
@@ -479,7 +457,7 @@ export async function replaceImage(obj, file) {
   try {
     data = await fileToDataURL(file);
   } catch {
-    emit('toast', "couldn't read that image — try jpeg or png");
+    emit('toast', "couldn't read that photo — try a jpeg or png");
     return;
   }
   const oldW = obj.width * obj.scaleX;
@@ -494,22 +472,28 @@ export async function replaceImage(obj, file) {
 
 export function resetImageSize(obj) {
   const s = Math.min(ed.docW / obj.width, ed.docH / obj.height);
-  obj.set({ scaleX: s, scaleY: s, left: (ed.docW - obj.width * s) / 2, top: (ed.docH - obj.height * s) / 2, angle: 0 });
+  obj.set({
+    scaleX: s, scaleY: s, angle: 0,
+    left: (ed.docW - obj.width * s) / 2,
+    top: (ed.docH - obj.height * s) / 2,
+  });
   obj.setCoords();
   ed.canvas.requestRenderAll();
   pushSnapshot(); markDirty();
+  emit('selection');
 }
 
 export async function duplicateObject(obj) {
   const clone = await obj.clone(PROPS);
-  clone.set({ left: obj.left + 18, top: obj.top + 18 });
+  const off = Math.round(ed.docW * 0.03);
+  clone.set({ left: obj.left + off, top: obj.top + off });
   if (clone.pName) clone.pName = autoName(clone.pKind);
   ed.canvas.add(clone);
   styleControls(clone);
   ed.canvas.setActiveObject(clone);
   ed.canvas.requestRenderAll();
   pushSnapshot(); markDirty();
-  emit('layers');
+  emit('layers'); emit('selection');
 }
 
 export function deleteObject(obj) {
@@ -525,16 +509,10 @@ export function reorder(obj, dir) {
   const c = ed.canvas;
   if (dir === 'forward') c.bringObjectForward(obj);
   if (dir === 'backward') c.sendObjectBackwards(obj);
+  if (dir === 'front') c.bringObjectToFront(obj);
+  if (dir === 'back') c.sendObjectToBack(obj);
   c.sendObjectToBack(ed.bgRect);
   c.requestRenderAll();
-  pushSnapshot(); markDirty();
-  emit('layers');
-}
-
-export function moveToIndex(obj, idx) {
-  ed.canvas.moveObjectTo(obj, idx);
-  ed.canvas.sendObjectToBack(ed.bgRect);
-  ed.canvas.requestRenderAll();
   pushSnapshot(); markDirty();
   emit('layers');
 }
@@ -542,6 +520,14 @@ export function moveToIndex(obj, idx) {
 export function setLocked(obj, locked) {
   obj.set({ pLocked: locked, selectable: !locked, evented: !locked });
   if (locked && ed.canvas.getActiveObject() === obj) ed.canvas.discardActiveObject();
+  ed.canvas.requestRenderAll();
+  markDirty(true);
+  emit('layers'); emit('selection');
+}
+
+export function setVisible(obj, visible) {
+  obj.set('visible', visible);
+  if (!visible && ed.canvas.getActiveObject() === obj) ed.canvas.discardActiveObject();
   ed.canvas.requestRenderAll();
   markDirty(true);
   emit('layers'); emit('selection');
@@ -556,21 +542,19 @@ export function nudge(dx, dy) {
   markDirty(true);
 }
 
-// bake scale into intrinsic dims so radius/stroke/font stay honest after resize
+// bake scale into intrinsic dims so radius/stroke/font stay honest after a resize
 function bakeScale(o) {
   if (!o) return;
-  if (o.pKind === 'text' && (o.scaleX !== 1 || o.scaleY !== 1)) {
-    o.set({
-      fontSize: Math.round(o.fontSize * o.scaleY * 10) / 10,
-      width: o.width * o.scaleX,
-      scaleX: 1, scaleY: 1,
-    });
+  const sx = o.scaleX, sy = o.scaleY;
+  if (sx === 1 && sy === 1) return;
+  if (o.pKind === 'text') {
+    o.set({ fontSize: Math.round(o.fontSize * sy * 10) / 10, width: o.width * sx, scaleX: 1, scaleY: 1 });
     o.setCoords();
-  } else if ((o.pKind === 'rect' || o.pKind === 'rounded') && (o.scaleX !== 1 || o.scaleY !== 1)) {
-    o.set({ width: o.width * o.scaleX, height: o.height * o.scaleY, scaleX: 1, scaleY: 1 });
+  } else if (o.pKind === 'rect' || o.pKind === 'rounded') {
+    o.set({ width: o.width * sx, height: o.height * sy, scaleX: 1, scaleY: 1 });
     o.setCoords();
-  } else if (o.pKind === 'ellipse' && (o.scaleX !== 1 || o.scaleY !== 1)) {
-    o.set({ rx: o.rx * o.scaleX, ry: o.ry * o.scaleY, scaleX: 1, scaleY: 1 });
+  } else if (o.pKind === 'ellipse') {
+    o.set({ rx: o.rx * sx, ry: o.ry * sy, scaleX: 1, scaleY: 1 });
     o.setCoords();
   }
 }
@@ -605,9 +589,7 @@ export function collectDocColors() {
 
 /* ---------- export ---------- */
 
-export function maxExportScale() {
-  return Math.max(1, Math.floor(6000 / Math.max(ed.docW, ed.docH)));
-}
+export const maxExportScale = () => Math.max(1, Math.floor(6000 / Math.max(ed.docW, ed.docH)));
 
 export async function exportPNG(scale) {
   const canvas = ed.canvas;
@@ -617,23 +599,21 @@ export async function exportPNG(scale) {
   const shadow = ed.bgRect.shadow;
   ed.bgRect.set('shadow', null);
   const url = canvas.toDataURL({
-    left: 0, top: 0, width: ed.docW, height: ed.docH,
-    format: 'png', multiplier: scale,
+    left: 0, top: 0, width: ed.docW, height: ed.docH, format: 'png', multiplier: scale,
   });
   ed.bgRect.set('shadow', shadow);
   canvas.requestRenderAll();
-  const slug = ed.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'flyer';
-  download(url, `${slug}-${ed.docW}x${ed.docH}@${scale}x.png`);
+  download(url, `${slug()}-${ed.docW * scale}x${ed.docH * scale}.png`);
 }
 
 export function saveProjectFile() {
-  const doc = serializeDoc();
-  const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify(serializeDoc())], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  const slug = ed.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'flyer';
-  download(url, `${slug}.pasteup.json`);
+  download(url, `${slug()}.pasteup.json`);
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
+
+const slug = () => ed.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'flyer';
 
 function download(url, filename) {
   const a = document.createElement('a');
@@ -644,7 +624,7 @@ function download(url, filename) {
   a.remove();
 }
 
-// swap an image's pixels (retouch result). keeps transforms; one undo entry.
+// swap an image's pixels (erase result); keeps transforms, one undo entry
 export async function swapImageSource(obj, dataURL) {
   await obj.setSrc(dataURL);
   obj.setCoords();

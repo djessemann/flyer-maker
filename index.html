@@ -21,7 +21,7 @@
 
 <!-- ============ home ============ -->
 <div id="viewHome" class="view on">
-  <div class="topbar home-bar">
+  <div class="topbar">
     <div class="app-name">pasteup</div>
     <div class="spacer"></div>
     <button class="pill ghost" id="btnImport">import</button>
@@ -29,100 +29,38 @@
   </div>
   <div class="home-scroll">
     <div class="home-grid" id="projectGrid"></div>
-    <div class="home-empty hint hidden" id="homeEmpty">no flyers yet — tap "new flyer" to start.</div>
+    <div class="home-empty hint hidden" id="homeEmpty">no flyers yet — tap “new flyer” to start.</div>
   </div>
 </div>
 
 <!-- ============ editor ============ -->
 <div id="viewEditor" class="view">
   <div class="topbar">
-    <button class="back" id="btnBack"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M9 2 L4 7 L9 12"/></svg><span class="phone-hide">projects</span></button>
-    <div class="vdiv"></div>
+    <button class="icon-btn" id="btnBack" title="projects"><svg width="16" height="16" viewBox="0 0 14 14"><path d="M9 2 L4 7 L9 12"/></svg></button>
     <button class="doc-title" id="docTitle">untitled flyer</button>
     <div class="spacer"></div>
-    <button class="icon-btn dim" id="btnUndo" title="undo"><svg width="17" height="17" viewBox="0 0 17 17"><path d="M6 3 L2.5 6.5 L6 10"/><path d="M2.5 6.5 H10 a4 4 0 0 1 4 4 v3"/></svg></button>
-    <button class="icon-btn dim" id="btnRedo" title="redo"><svg width="17" height="17" viewBox="0 0 17 17"><path d="M11 3 L14.5 6.5 L11 10"/><path d="M14.5 6.5 H7 a4 4 0 0 0 -4 4 v3"/></svg></button>
-    <div class="vdiv"></div>
-    <button class="zoom" id="btnZoom">100%</button>
-    <button class="pill" id="btnExportTop">export</button>
-    <button class="icon-btn phone-only" id="btnExportPhone" title="export"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 10 V2 M5 4.5 L8 1.5 L11 4.5"/><path d="M3 8 V13.5 H13 V8"/></svg></button>
+    <button class="icon-btn dim" id="btnUndo" title="undo"><svg width="18" height="18" viewBox="0 0 17 17"><path d="M6 3 L2.5 6.5 L6 10"/><path d="M2.5 6.5 H10 a4 4 0 0 1 4 4 v3"/></svg></button>
+    <button class="icon-btn dim" id="btnRedo" title="redo"><svg width="18" height="18" viewBox="0 0 17 17"><path d="M11 3 L14.5 6.5 L11 10"/><path d="M14.5 6.5 H7 a4 4 0 0 0 -4 4 v3"/></svg></button>
+    <button class="icon-btn" id="btnExport" title="export"><svg width="18" height="18" viewBox="0 0 16 16"><path d="M8 10.5 V2 M5 5 L8 2 L11 5"/><path d="M3 8.5 V13.5 H13 V8.5"/></svg></button>
   </div>
 
-  <div class="body-row">
-    <!-- tool rail -->
-    <div class="rail">
-      <button class="tool on" data-tool="move" title="move"><svg width="18" height="18" viewBox="0 0 18 18"><path d="M4 2.5 L13.5 9 L8.8 9.8 L11.2 14.6 L9.2 15.6 L6.8 10.8 L4 13.5 Z"/></svg></button>
-      <button class="tool" data-tool="text" title="text" style="font-size:16px;font-weight:500">T</button>
-      <button class="tool" data-tool="shape" title="shape"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="3" y="3" width="12" height="12"/></svg></button>
-      <button class="tool" data-tool="image" title="image"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="2.5" y="3.5" width="13" height="11"/><circle cx="6.5" cy="7" r="1.4"/><path d="M4 13 L8.5 9 L11 11.5 L13 9.5 L15 11.5"/></svg></button>
-      <button class="tool" data-tool="retouch" title="retouch"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="6.6" y="1.6" width="6" height="10" rx="1" transform="rotate(45 9 9)"/><path d="M4.5 10.5 L8 14"/><path d="M2.5 15.5 H9"/></svg></button>
-      <div class="push"></div>
-      <button class="tool" data-tool="settings" title="canvas settings"><svg width="18" height="18" viewBox="0 0 18 18"><path d="M2.5 5 H15.5 M2.5 9 H15.5 M2.5 13 H15.5"/><circle cx="6.5" cy="5" r="1.6" fill="var(--paper)"/><circle cx="12" cy="9" r="1.6" fill="var(--paper)"/><circle cx="8" cy="13" r="1.6" fill="var(--paper)"/></svg></button>
-    </div>
-
-    <!-- workspace: fabric mounts here -->
-    <div class="ws" id="ws">
-      <div class="canvas-host"><canvas id="fab"></canvas></div>
-      <button class="layers-pill" id="pillLayers">layers<b id="pillCount">0</b></button>
-    </div>
-
-    <!-- right panel (becomes a bottom sheet on narrow screens) -->
-    <div class="panel collapsed" id="panel">
-      <div class="grab"></div>
-      <div class="sheet-head"></div>
-      <div class="tabs" id="panelTabs">
-        <button class="tab" data-pane="pane-layers">layers</button>
-        <button class="tab" data-pane="pane-style">style</button>
-        <button class="tab" data-pane="pane-canvas">canvas</button>
-      </div>
-      <div class="tabpane" id="pane-layers">
-        <div id="selBlock"></div>
-        <div class="lbl" id="layerCount" style="margin-bottom:6px">0 layers</div>
-        <div id="layerList"></div>
-      </div>
-      <div class="tabpane" id="pane-style"></div>
-      <div class="tabpane" id="pane-canvas">
-        <div class="lbl" style="margin-bottom:2px">size</div>
-        <div id="presets"></div>
-        <div class="wh">
-          <label class="field">w<input id="inW" type="number" inputmode="numeric" min="100" max="6000"></label>
-          <label class="field">h<input id="inH" type="number" inputmode="numeric" min="100" max="6000"></label>
-        </div>
-        <div class="rowbtns" style="margin-top:12px">
-          <button class="pill ghost" id="btnSwap">swap orientation</button>
-        </div>
-        <div class="group" style="margin-top:20px">
-          <div class="lbl"><span>background</span></div>
-          <div class="swatches" id="bgSwatches"></div>
-        </div>
-        <div class="export-block">
-          <div class="lbl"><span>export scale</span></div>
-          <div class="seg" id="segScale"><button data-s="1">1x</button><button data-s="2" class="on">2x</button><button data-s="3">3x</button></div>
-          <button class="pill" id="btnExport">export png</button>
-          <button class="pill ghost" id="btnSaveFile">save project file</button>
-        </div>
-      </div>
-    </div>
+  <div class="ws" id="ws">
+    <div class="canvas-host"><canvas id="fab"></canvas></div>
+    <button class="zoom-pill" id="btnZoom">100%</button>
   </div>
 
-  <!-- phone bottom toolbar -->
-  <div class="toolbar">
-    <button class="tool on" data-tool="move"><svg width="18" height="18" viewBox="0 0 18 18"><path d="M4 2.5 L13.5 9 L8.8 9.8 L11.2 14.6 L9.2 15.6 L6.8 10.8 L4 13.5 Z"/></svg></button>
-    <button class="tool" data-tool="text" style="font-size:16px;font-weight:500">T</button>
-    <button class="tool" data-tool="shape"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="3" y="3" width="12" height="12"/></svg></button>
-    <button class="tool" data-tool="image"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="2.5" y="3.5" width="13" height="11"/><circle cx="6.5" cy="7" r="1.4"/><path d="M4 13 L8.5 9 L11 11.5 L13 9.5 L15 11.5"/></svg></button>
-    <button class="tool" data-tool="retouch"><svg width="18" height="18" viewBox="0 0 18 18"><rect x="6.6" y="1.6" width="6" height="10" rx="1" transform="rotate(45 9 9)"/><path d="M4.5 10.5 L8 14"/></svg></button>
-    <button class="layers-pill" id="pillLayersPhone">layers<b id="pillCountPhone">0</b></button>
-  </div>
+  <!-- contextual action bar: contents depend on what's selected -->
+  <div class="actionbar" id="actionbar"></div>
 </div>
 
-<!-- ============ retouch mode ============ -->
+<!-- ============ erase (object removal) ============ -->
 <div id="retouch">
   <div class="rt-top">
-    <span class="lbl" style="font-size:12px">retouch</span>
-    <span class="hint" id="rtHint">paint over what you want gone</span>
-    <div class="spacer"></div>
     <button class="pill ghost" id="rtCancel">cancel</button>
+    <div class="spacer"></div>
+    <div class="rt-title" id="rtHint">paint over what you want gone</div>
+    <div class="spacer"></div>
+    <button class="pill" id="rtGo">erase</button>
   </div>
   <div class="rt-stage" id="rtStage">
     <canvas id="rtImg"></canvas>
@@ -131,21 +69,31 @@
   <div class="rt-bar">
     <div class="rt-brush">
       <span class="lbl">brush</span>
-      <input type="range" id="rtSize" min="10" max="120" value="44">
+      <input type="range" id="rtSize" min="10" max="140" value="48">
       <span class="rt-dot" id="rtDot"></span>
     </div>
-    <div class="seg" id="rtMode"><button data-m="mask" class="on">mask</button><button data-m="erase">erase</button></div>
-    <button class="pill ghost" id="rtClear">clear</button>
-    <button class="pill" id="rtGo">remove</button>
+    <div class="rt-tools">
+      <div class="seg" id="rtMode"><button data-m="paint" class="on">paint</button><button data-m="erase">unpaint</button></div>
+      <button class="pill ghost" id="rtUndo">undo</button>
+      <button class="pill ghost" id="rtClear">clear</button>
+    </div>
   </div>
 </div>
 
-<!-- shared bits -->
+<!-- ============ shared overlays (body level — always above the views) ============ -->
 <div class="overlay" id="overlay"></div>
-<div class="pop fp" id="popFont"></div>
-<div class="pop cp" id="popColor"></div>
-<div class="pop" id="popMenu"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-grab"></div>
+  <div class="sheet-head">
+    <button class="icon-btn sheet-back hidden" id="sheetBack"><svg width="15" height="15" viewBox="0 0 14 14"><path d="M9 2 L4 7 L9 12"/></svg></button>
+    <span class="sheet-title" id="sheetTitle"></span>
+    <div class="spacer"></div>
+    <button class="icon-btn" id="sheetClose"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 3 L11 11 M11 3 L3 11"/></svg></button>
+  </div>
+  <div class="sheet-body" id="sheetBody"></div>
+</div>
 <div id="toast"></div>
+
 <input type="file" id="fileImage" accept="image/*" class="hidden">
 <input type="file" id="fileProject" accept=".json,application/json" class="hidden">
 
