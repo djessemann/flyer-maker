@@ -224,9 +224,9 @@ input[type=range]::-moz-range-thumb{width:14px;height:14px;background:var(--ink)
   .phone-hide{display:none}
   .toolbar{display:flex}
   .ws .layers-pill{display:none}
-  .topbar{gap:8px;padding:0 8px}
-  .topbar .zoom,.topbar #btnRedo,.topbar .vdiv{display:none}
-  .topbar .pill{display:none}
+  #viewEditor .topbar{gap:8px;padding:0 8px}
+  .topbar .zoom,#btnRedo,#viewEditor .topbar .vdiv{display:none}
+  #btnExportTop{display:none}
   .topbar .phone-only{display:flex}
   .panel{height:72%}
   .pop{left:0 !important;right:0 !important;bottom:0;top:auto !important;width:auto;max-width:none;
