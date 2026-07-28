@@ -20,7 +20,7 @@ function ensureWorker() {
       if (e.data.type === 'ready') resolve();
       if (e.data.type === 'error') reject(new Error(e.data.message));
     };
-    worker.onerror = () => reject(new Error('worker failed'));
+    worker.onerror = e => reject(new Error('worker failed: ' + (e.message || 'script error')));
   });
   return workerReady;
 }
@@ -68,7 +68,10 @@ function open(fabricImage) {
   let settled = false;
   ensureWorker().then(
     () => { settled = true; if ($('#retouch').classList.contains('on')) $('#rtHint').textContent = 'paint over what you want gone'; },
-    () => { settled = true; showToast('retouch engine failed to load — offline?'); }
+    err => {
+      settled = true;
+      showToast('retouch engine failed to load: ' + String(err.message || err).slice(0, 120), 5000);
+    }
   );
   setTimeout(() => { if (!settled) $('#rtHint').textContent = 'loading retouch engine…'; }, 400);
 }

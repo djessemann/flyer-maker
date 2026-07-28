@@ -2,17 +2,42 @@
 // telea inpaint on a padded region only; the page composites the patch back.
 /* global cv, importScripts */
 
-const OPENCV_URL = 'https://docs.opencv.org/4.10.0/opencv.js';
+// pinned primary + pinned fallback (same 4.10.0 build via jsdelivr) + docs latest
+const OPENCV_URLS = [
+  'https://docs.opencv.org/4.10.0/opencv.js',
+  'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
+  'https://docs.opencv.org/4.x/opencv.js',
+];
+
+async function initFrom(url) {
+  importScripts(url);
+  let mod = self.cv;
+  if (mod && typeof mod.then === 'function') {
+    mod = await mod;                       // modularized build: cv is a thenable
+  } else if (typeof mod === 'function') {
+    mod = await mod();                     // factory build: cv() returns a promise
+  } else if (mod && !mod.Mat) {
+    await new Promise((resolve, reject) => {   // classic build: wait for runtime
+      const t = setTimeout(() => reject(new Error('opencv init timed out')), 25000);
+      mod.onRuntimeInitialized = () => { clearTimeout(t); resolve(); };
+    });
+  }
+  if (!mod || !mod.Mat) throw new Error('no Mat after init');
+  if (!mod.inpaint) throw new Error('build lacks inpaint');
+  self.cv = mod;
+}
 
 let ready = (async () => {
-  importScripts(OPENCV_URL);
-  // opencv.js ships either as a global with onRuntimeInitialized or as a thenable module
-  if (typeof cv !== 'undefined' && typeof cv.then === 'function') {
-    self.cv = await cv;
-  } else if (typeof cv !== 'undefined' && !cv.Mat) {
-    await new Promise(resolve => { cv.onRuntimeInitialized = resolve; });
+  const failures = [];
+  for (const url of OPENCV_URLS) {
+    try {
+      await initFrom(url);
+      return;
+    } catch (err) {
+      failures.push(`${new URL(url).host}: ${err && err.message || err}`);
+    }
   }
-  if (!cv || !cv.Mat) throw new Error('opencv failed to initialize');
+  throw new Error(failures.join(' · '));
 })();
 
 ready.then(
