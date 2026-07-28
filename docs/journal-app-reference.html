@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-title" content="Journal"/>
+  <meta name="theme-color" content="#F8F7F4"/>
+  <title>Journal</title>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="icon" type="image/svg+xml" href="icon.svg"/>
+  <!-- PWA icon injected via script below -->
+  <link id="apple-touch-icon" rel="apple-touch-icon"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; width: 100%; overflow: hidden; background: #F8F7F4; }
+    body { font-family: 'DM Mono', 'Courier New', monospace; -webkit-font-smoothing: antialiased; }
+    .scroll-list { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .scroll-list::-webkit-scrollbar { display: none; }
+
+```
+.tap-row:active .tap-target { opacity: 0.4; }
+.btn-text:active  { opacity: 0.3; }
+.btn-icon:active  { opacity: 0.3; }
+
+.sheet { animation: slideUp 0.28s cubic-bezier(0.32, 1.1, 0.58, 1) forwards; }
+@keyframes slideUp { from { transform: translateY(110%); } to { transform: translateY(0); } }
+.overlay { animation: fadeIn 0.16s ease forwards; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+textarea { -webkit-user-select: text; user-select: text; }
+
+.filter-row {
+  mask-image: linear-gradient(to right, black 82%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black 82%, transparent 100%);
+}
+
+@media (min-width: 500px) {
+  body { background: #E8E6E0; display: flex; align-items: center; justify-content: center; }
+  #root { width: 393px; height: 852px; border-radius: 47px; overflow: hidden; flex-shrink: 0;
+          box-shadow: 0 32px 100px rgba(0,0,0,0.22), 0 0 0 1px rgba(0,0,0,0.08); }
+}
+
+@media (min-width: 768px) {
+  #root { width: 480px; height: 920px; }
+}
+
+@media (min-width: 1024px) {
+  #root { width: 520px; height: 960px; }
+}
+```
+
+  </style>
+  <script>
+    // Generate PWA home screen icon as inline PNG via canvas
+    (function() {
+      const SIZE = 512;
+      const c = document.createElement('canvas');
+      c.width = c.height = SIZE;
+      const ctx = c.getContext('2d');
+      const R = SIZE / 86; // scale factor from our 86x86 viewBox
+
+```
+  // Background
+  ctx.fillStyle = '#F8F7F4';
+  // Rounded rect background
+  const br = SIZE * 0.18; // iOS-style corner radius
+  ctx.beginPath();
+  ctx.moveTo(br, 0);
+  ctx.lineTo(SIZE - br, 0);
+  ctx.quadraticCurveTo(SIZE, 0, SIZE, br);
+  ctx.lineTo(SIZE, SIZE - br);
+  ctx.quadraticCurveTo(SIZE, SIZE, SIZE - br, SIZE);
+  ctx.lineTo(br, SIZE);
+  ctx.quadraticCurveTo(0, SIZE, 0, SIZE - br);
+  ctx.lineTo(0, br);
+  ctx.quadraticCurveTo(0, 0, br, 0);
+  ctx.closePath();
+  ctx.fill();
+
+  // Apply rotation -8deg around center, scale down 15%
+  ctx.save();
+  ctx.translate(SIZE / 2, SIZE / 2);
+  ctx.scale(0.85, 0.85);
+  ctx.rotate(-8 * Math.PI / 180);
+  ctx.translate(-SIZE / 2, -SIZE / 2);
+
+  ctx.strokeStyle = '#111110';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  function s(n) { return n * R; } // scale helper
+
+  // Spine rect: x16 y9 w12 h68
+  ctx.lineWidth = 3.5 * R;
+  ctx.beginPath();
+  ctx.roundRect(s(16), s(9), s(12), s(68), 1.5 * R);
+  ctx.stroke();
+
+  // Cover rect: x28 y9 w41 h68
+  ctx.beginPath();
+  ctx.roundRect(s(28), s(9), s(41), s(68), 1.5 * R);
+  ctx.stroke();
+
+  // Squiggle doodle
+  ctx.lineWidth = 2.2 * R;
+  ctx.beginPath();
+  ctx.moveTo(s(34), s(46));
+  ctx.bezierCurveTo(s(36), s(46), s(37), s(38), s(40), s(38));
+  ctx.bezierCurveTo(s(43), s(38), s(44), s(54), s(47), s(54));
+  ctx.bezierCurveTo(s(50), s(54), s(51), s(40), s(54), s(40));
+  ctx.bezierCurveTo(s(57), s(40), s(58), s(50), s(61), s(50));
+  ctx.bezierCurveTo(s(63), s(50), s(64), s(46), s(66), s(46));
+  ctx.stroke();
+
+  ctx.restore();
+
+  // Set as apple-touch-icon
+  const png = c.toDataURL('image/png');
+  document.getElementById('apple-touch-icon').href = png;
+})();
+```
+
+  </script>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const TYPES   = ["Brain Dump", "Inspiration", "Highlight"];
+const SCREENS = { WRITE:"write", ARCHIVE:"archive", SETTINGS:"settings" };
+const LS_KEY  = "dsj_v3";
+
+// Tiny dot colors — the only color in the UI
+const TYPE_DOT = { "Brain Dump":"#999", Inspiration:"#999", Highlight:"#999" };
+
+const SEED_PUB = [
+  { id:1, text:"Need to think through the blend naming problem more. The issue isn't just the name — users don't understand the value prop before they've tried it.", type:"Brain Dump", date:"Mar 25", time:"8:42 AM" },
+  { id:2, text:"The idea of a journal that opens straight to the cursor is about removing the activation energy of writing. Every extra tap is a reason not to.", type:"Inspiration", date:"Mar 24", time:"9:15 PM" },
+  { id:3, text:"Good run. 7 miles, felt strong the whole way. The trick was not eating before.", type:"Highlight", date:"Mar 23", time:"7:03 AM" },
+  { id:4, text:"Thinking about how content design changes when AI can generate first drafts. The job becomes more about judgment and less about production.", type:"Brain Dump", date:"Mar 22", time:"11:30 AM" },
+  { id:5, text:"Daughter said 'actually' correctly in context today. Completely unprompted.", type:"Highlight", date:"Mar 21", time:"6:58 PM" },
+];
+const SEED_DRAFTS = [
+  { id:101, text:"Half-formed thought about the difference between content strategy and content design — they get collapsed all the time but", type:"Brain Dump", date:"Mar 24", time:"3:11 PM" },
+  { id:102, text:"", type:"Inspiration", date:"Mar 22", time:"10:00 AM" },
+];
+
+function loadState() {
+  try { const r = localStorage.getItem(LS_KEY); if (r) return JSON.parse(r); } catch(e) {}
+  return { published:SEED_PUB, drafts:SEED_DRAFTS, dark:false, startOn:"Write" };
+}
+function saveState(s) { try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch(e) {} }
+
+function nowStamp() {
+  const d = new Date();
+  return {
+    date: d.toLocaleDateString("en-US", { month:"short", day:"numeric" }),
+    time: d.toLocaleTimeString("en-US", { hour:"numeric", minute:"2-digit" }),
+  };
+}
+
+// ── Icon set — nav (24×24) + action icons (38×38)
+const ACTION_ICONS = ["brain","bulb","heart","floppy","plane"];
+function Icon({ name, size=24, color="currentColor" }) {
+  const p = {
+    write:    <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>,
+    archive:  <><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></>,
+    settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></>,
+    plus:     <><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>,
+    x:        <><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></>,
+    export:   <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>,
+    upload:   <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>,
+    brain: <><path d="M19 9 C17 8 14.5 8 13 9.5 C11 11.5 11 14 12 16 C10 18 9.5 21.5 11 24.5 C12.5 27.5 15.5 29 19 29" strokeWidth="1.7"/><path d="M19 9 C21 8 23.5 8 25 9.5 C27 11.5 27 14 26 16 C28 18 28.5 21.5 27 24.5 C25.5 27.5 22.5 29 19 29" strokeWidth="1.7"/><line x1="19" y1="10" x2="19" y2="29" strokeWidth="1.1"/><path d="M13 18 Q15.5 16.5 17 19" strokeWidth="1.2" fill="none"/><path d="M12.5 23 Q14.5 21.5 16 24" strokeWidth="1.2" fill="none"/><path d="M25 18 Q22.5 16.5 21 19" strokeWidth="1.2" fill="none"/><path d="M25.5 23 Q23.5 21.5 22 24" strokeWidth="1.2" fill="none"/></>,
+    bulb: <><path d="M14.5 22 C11.5 19.5 10.5 14.5 12 11.5 C13.5 8.5 16 7.5 19 7.5 C22 7.5 24.5 8.5 26 11.5 C27.5 14.5 26.5 19.5 23.5 22 L23.5 24 L14.5 24 Z" strokeWidth="1.7"/><path d="M17.5 20 C17.5 17 19 15.5 19 13 C19 15.5 20.5 17 20.5 20" strokeWidth="1.2" fill="none"/><line x1="14.5" y1="26" x2="23.5" y2="26" strokeWidth="1.5"/><line x1="15.5" y1="28.5" x2="22.5" y2="28.5" strokeWidth="1.5"/><path d="M17 30.5 Q19 31.5 21 30.5" strokeWidth="1.4" fill="none"/><line x1="19" y1="3.5" x2="19" y2="5.5" strokeWidth="1.3"/><line x1="10" y1="6" x2="11.5" y2="7.5" strokeWidth="1.3"/><line x1="28" y1="6" x2="26.5" y2="7.5" strokeWidth="1.3"/><line x1="7.5" y1="13" x2="9.5" y2="13" strokeWidth="1.3"/><line x1="30.5" y1="13" x2="28.5" y2="13" strokeWidth="1.3"/></>,
+    heart: <><path d="M19 30 L17.5 28.5 C11 23 8 19.5 8 15.5 C8 11.5 11 8.5 15 8.5 C17.2 8.5 18.3 9.5 19 10.5 C19.7 9.5 20.8 8.5 23 8.5 C27 8.5 30 11.5 30 15.5 C30 19.5 27 23 20.5 28.5 Z" strokeWidth="1.7"/></>,
+    floppy: <><path d="M9 8 L9 30 Q9 31 10 31 L28 31 Q29 31 29 30 L29 12 L25 8 Z" strokeWidth="1.7"/><rect x="13" y="8" width="12" height="8" rx="0.5" strokeWidth="1.4"/><rect x="19" y="8" width="3.5" height="8" strokeWidth="1.2"/><rect x="13" y="21" width="12" height="7" rx="1" strokeWidth="1.4"/></>,
+    plane: <><path d="M7 20 L31 8 L24 31 L19 22 Z" strokeWidth="1.7"/><line x1="19" y1="22" x2="31" y2="8" strokeWidth="1.2"/></>,
+  };
+  const vb = ACTION_ICONS.includes(name) ? "0 0 38 38" : "0 0 24 24";
+  return (
+    <svg width={size} height={size} viewBox={vb} fill="none"
+      stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+      style={{ display:"block", flexShrink:0 }}>
+      {p[name]}
+    </svg>
+  );
+}
+const TYPE_ICON = { "Brain Dump":"brain", Inspiration:"bulb", Highlight:"heart" };
+
+// ── Theme — nearly monochrome
+function theme(dark) {
+  return dark ? {
+    bg:"#111110", text:"#E8E6E0", muted:"#777", muted2:"#444",
+    border:"rgba(255,255,255,0.09)", hairline:"rgba(255,255,255,0.06)",
+    danger:"#cc4444", ink:"#E8E6E0", faint:"rgba(255,255,255,0.04)",
+  } : {
+    bg:"#F8F7F4", text:"#111110", muted:"#555", muted2:"#bbb",
+    border:"rgba(0,0,0,0.10)", hairline:"rgba(0,0,0,0.06)",
+    danger:"#cc3333", ink:"#111110", faint:"rgba(0,0,0,0.03)",
+  };
+}
+
+/* ══════════════════════ APP ══════════════════════════════════════════════ */
+function App() {
+  const init = loadState();
+  const [dark,      setDark]      = useState(init.dark);
+  const [startOn,   setStartOn]   = useState(init.startOn);
+  const [published, setPublished] = useState(init.published);
+  const [drafts,    setDrafts]    = useState(init.drafts);
+  const [screen,    setScreen]    = useState(init.startOn === "Archive" ? SCREENS.ARCHIVE : SCREENS.WRITE);
+  const [text,      setText]      = useState("");
+  const [entryType, setEntryType] = useState("Brain Dump");
+  const [editingId,      setEditingId]      = useState(null);
+  const [editingDraftId, setEditingDraftId] = useState(null);
+  const [archiveTab, setArchiveTab] = useState("Published");
+  const [filter,     setFilter]    = useState("All");
+  const [confirmId,  setConfirmId]  = useState(null);
+  const [confirmType, setConfirmType] = useState(null); // "published" | "draft"
+  const [toast,      setToast]      = useState(null);
+  const taRef = useRef(null);
+  const T = theme(dark);
+
+  useEffect(() => { saveState({ published, drafts, dark, startOn }); }, [published, drafts, dark, startOn]);
+  useEffect(() => {
+    if (screen === SCREENS.WRITE) { const t = setTimeout(() => taRef.current?.focus(), 80); return () => clearTimeout(t); }
+  }, [screen]);
+
+  const reset = useCallback(() => {
+    setText(""); setEntryType("Brain Dump"); setEditingId(null); setEditingDraftId(null);
+  }, []);
+
+  const showToast = useCallback((msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 1600);
+  }, []);
+
+  const publish = useCallback(() => {
+    if (!text.trim()) return;
+    const ts = nowStamp();
+    if (editingId) {
+      const orig = published.find(e => e.id === editingId);
+      setPublished(p => p.map(e => e.id === editingId ? { ...e, text, type:entryType, date:orig.date, time:orig.time } : e));
+      showToast("entry updated");
+    } else {
+      setPublished(p => [{ id:Date.now(), text, type:entryType, ...ts }, ...p]);
+      showToast("published");
+    }
+    if (editingDraftId) setDrafts(d => d.filter(x => x.id !== editingDraftId));
+    reset();
+  }, [text, entryType, editingId, editingDraftId, published, reset, showToast]);
+
+  const saveDraft = useCallback(() => {
+    if (!text.trim()) return;
+    const ts = nowStamp();
+    if (editingDraftId) {
+      setDrafts(d => d.map(x => x.id === editingDraftId ? { ...x, text, type:entryType, ...ts } : x));
+      showToast("draft updated");
+    } else {
+      setDrafts(d => [{ id:Date.now(), text, type:entryType, ...ts }, ...d]);
+      showToast("draft saved");
+    }
+    reset();
+  }, [text, entryType, editingDraftId, reset, showToast]);
+
+  const openDraft = useCallback((d) => {
+    setText(d.text); setEntryType(d.type); setEditingDraftId(d.id); setEditingId(null); setScreen(SCREENS.WRITE);
+  }, []);
+
+  const openPublished = useCallback((e) => {
+    setText(e.text); setEntryType(e.type); setEditingId(e.id); setEditingDraftId(null); setScreen(SCREENS.WRITE);
+  }, []);
+
+  const startNew  = useCallback(() => { reset(); setScreen(SCREENS.WRITE); }, [reset]);
+  const goArchive = useCallback(() => { setScreen(SCREENS.ARCHIVE); }, []);
+  const goSettings= useCallback(() => { setScreen(SCREENS.SETTINGS); }, []);
+
+  const confirmDelete = useCallback((id, type) => {
+    setConfirmId(id); setConfirmType(type);
+  }, []);
+  const executeDelete = useCallback(() => {
+    if (confirmType === "published") setPublished(p => p.filter(e => e.id !== confirmId));
+    else setDrafts(d => d.filter(x => x.id !== confirmId));
+    setConfirmId(null); setConfirmType(null);
+  }, [confirmId, confirmType]);
+
+  const exportXLSX = useCallback(() => {
+    if (!published.length) return;
+    const wb = XLSX.utils.book_new();
+    const cols = [{ wch:10 }, { wch:8 }, { wch:80 }];
+    const allRows = [["Date","Time","Entry"], ...published.map(e => [e.date, e.time, e.text])];
+    const wsAll = XLSX.utils.aoa_to_sheet(allRows); wsAll["!cols"] = cols;
+    XLSX.utils.book_append_sheet(wb, wsAll, "All");
+    TYPES.forEach(type => {
+      const rows = published.filter(e => e.type === type);
+      if (!rows.length) return;
+      const ws = XLSX.utils.aoa_to_sheet([["Date","Time","Entry"], ...rows.map(e => [e.date, e.time, e.text])]);
+      ws["!cols"] = cols;
+      XLSX.utils.book_append_sheet(wb, ws, type);
+    });
+    XLSX.writeFile(wb, `journal-${new Date().toISOString().slice(0,10)}.xlsx`);
+  }, [published]);
+
+  const importXLSX = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type:"array" });
+        const entries = [];
+        const seen = new Set();
+        // Read type-specific sheets first for proper categorization
+        TYPES.forEach(type => {
+          const ws = wb.Sheets[type];
+          if (!ws) return;
+          const rows = XLSX.utils.sheet_to_json(ws);
+          rows.forEach(row => {
+            const text = (row.Entry || "").trim();
+            if (!text) return;
+            const key = `${row.Date}|${row.Time}|${text}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            entries.push({ id: Date.now() + Math.random(), text, type, date: row.Date || "", time: row.Time || "" });
+          });
+        });
+        // Fall back to "All" sheet for any entries not in type sheets
+        const wsAll = wb.Sheets["All"];
+        if (wsAll) {
+          const rows = XLSX.utils.sheet_to_json(wsAll);
+          rows.forEach(row => {
+            const text = (row.Entry || "").trim();
+            if (!text) return;
+            const key = `${row.Date}|${row.Time}|${text}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            entries.push({ id: Date.now() + Math.random(), text, type: "Brain Dump", date: row.Date || "", time: row.Time || "" });
+          });
+        }
+        if (entries.length) {
+          setPublished(p => [...entries, ...p]);
+          showToast(`${entries.length} entries imported`);
+        } else {
+          showToast("no entries found");
+        }
+      } catch (err) {
+        showToast("import failed");
+      }
+      e.target.value = "";
+    };
+    reader.readAsArrayBuffer(file);
+  }, [showToast]);
+
+  const canPublish = text.trim().length > 0;
+  const filtered   = filter === "All" ? published : published.filter(e => e.type === filter);
+
+  const safeTop    = "env(safe-area-inset-top, 0px)";
+  const safeBottom = "env(safe-area-inset-bottom, 0px)";
+
+  // Shared text button style
+  const textBtn = (active, opts={}) => ({
+    background:"none", border:"none", cursor:"pointer", fontFamily:"inherit",
+    color: active ? T.text : T.muted,
+    fontWeight: active ? 500 : 400,
+    fontSize: opts.size || 16,
+    padding: opts.padding || "6px 0",
+    textDecoration: active && opts.underline ? "underline" : "none",
+    textUnderlineOffset: "3px",
+    letterSpacing: "0.02em",
+    ...opts,
+  });
+
+  /* ── Write ─────────────────────────────────────────────────────────── */
+  const isEditDraft = editingDraftId !== null;
+  const isEditPub   = editingId !== null;
+
+  const writeScreen = (
+      <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", paddingTop:safeTop, background:T.bg }}>
+        <TopNav active="write"/>
+
+        {/* Textarea */}
+        <div style={{ flex:1, padding:"16px 24px 0", overflow:"hidden" }}>
+          <textarea ref={taRef} value={text} onChange={e => setText(e.target.value)}
+            placeholder="start writing…"
+            style={{
+              width:"100%", height:"100%", background:"transparent",
+              border:"none", outline:"none", resize:"none",
+              fontSize:20, lineHeight:1.8, color:T.text,
+              fontFamily:"'DM Mono','Courier New',monospace", fontWeight:400,
+              caretColor: T.text,
+            }}/>
+        </div>
+
+        {/* Tags + Actions — icon row */}
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                      padding:`14px 24px calc(18px + ${safeBottom})`, borderTop:`1px solid ${T.border}` }}>
+          {/* Type tags */}
+          <div style={{ display:"flex", gap:20, alignItems:"center" }}>
+            {TYPES.map(t => {
+              const active = entryType === t;
+              return (
+                <button key={t} className="btn-icon" onClick={() => setEntryType(t)}
+                  style={{ background:"none", border:"none", cursor:"pointer", padding:0,
+                           display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                  <Icon name={TYPE_ICON[t]} size={36} color={active ? T.text : T.muted}/>
+                  <div style={{ width:16, height:1.5, background: active ? T.text : "transparent" }}/>
+                </button>
+              );
+            })}
+          </div>
+          {/* Actions */}
+          <div style={{ display:"flex", gap:20, alignItems:"center" }}>
+            <button className="btn-icon" onClick={canPublish ? saveDraft : undefined}
+              style={{ background:"none", border:"none", padding:0,
+                       display:"flex", flexDirection:"column", alignItems:"center", gap:4,
+                       opacity: canPublish ? 1 : 0.25,
+                       cursor: canPublish ? "pointer" : "default" }}>
+              <Icon name="floppy" size={36} color={T.muted}/>
+              <div style={{ width:16, height:1.5, background:"transparent" }}/>
+            </button>
+            <button className="btn-icon" onClick={canPublish ? publish : undefined}
+              style={{ background:"none", border:"none", padding:0,
+                       display:"flex", flexDirection:"column", alignItems:"center", gap:4,
+                       opacity: canPublish ? 1 : 0.25,
+                       cursor: canPublish ? "pointer" : "default" }}>
+              <Icon name="plane" size={36} color={canPublish ? T.text : T.muted}/>
+              <div style={{ width:16, height:1.5, background:"transparent" }}/>
+            </button>
+          </div>
+        </div>
+      </div>
+  );
+
+  /* ── Archive ────────────────────────────────────────────────────────── */
+  const archiveScreen = (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", paddingTop:safeTop, background:T.bg }}>
+      <TopNav active="archive"/>
+
+      {/* Tabs */}
+      <div style={{ display:"flex", padding:"14px 24px 0", gap:20, borderBottom:`1px solid ${T.border}` }}>
+        {["Published","Drafts"].map(tab => {
+          const active = archiveTab === tab;
+          const count  = tab === "Drafts" && drafts.length > 0 ? drafts.length : null;
+          return (
+            <button key={tab} className="btn-text" onClick={() => setArchiveTab(tab)}
+              style={{
+                ...textBtn(active, { size:17, underline:false }),
+                paddingBottom:10, marginBottom:-1,
+                borderBottom:`1.5px solid ${active ? T.text : "transparent"}`,
+                display:"flex", alignItems:"center", gap:6,
+              }}>
+              {tab.toLowerCase()}
+              {count && <span style={{ fontSize:14, color:T.muted }}>({count})</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Filter — icon chips */}
+      {archiveTab === "Published" && (
+        <div style={{ display:"flex", gap:24, padding:"14px 24px", flexShrink:0, alignItems:"center" }}>
+          <button className="btn-icon" onClick={() => setFilter("All")}
+            style={{ background:"none", border:"none", cursor:"pointer", padding:0,
+                     display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+            <span style={{ fontSize:16, fontWeight: filter === "All" ? 500 : 400, color: filter === "All" ? T.text : T.muted, letterSpacing:"0.04em" }}>all</span>
+            <div style={{ width:18, height:1.5, background: filter === "All" ? T.text : "transparent" }}/>
+          </button>
+          {TYPES.map(t => {
+            const active = filter === t;
+            return (
+              <button key={t} className="btn-icon" onClick={() => setFilter(t)}
+                style={{ background:"none", border:"none", cursor:"pointer", padding:0,
+                         display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+                <Icon name={TYPE_ICON[t]} size={31} color={active ? T.text : T.muted}/>
+                <div style={{ width:18, height:1.5, background: active ? T.text : "transparent" }}/>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {archiveTab === "Drafts" && <div style={{ height:10 }}/>}
+
+      {/* List */}
+      <div className="scroll-list" style={{ flex:1, padding:"0 24px" }}>
+        {archiveTab === "Published" && (
+          filtered.length === 0
+            ? <Empty msg="nothing published yet"/>
+            : filtered.map(e => <Row key={e.id} entry={e} isDraft={false} onTap={() => openPublished(e)} onDelete={() => confirmDelete(e.id, "published")}/>)
+        )}
+        {archiveTab === "Drafts" && (
+          drafts.length === 0
+            ? <Empty msg="no drafts"/>
+            : drafts.map(d => <Row key={d.id} entry={d} isDraft={true} onTap={() => openDraft(d)} onDelete={() => confirmDelete(d.id, "draft")}/>)
+        )}
+        <div style={{ height:`calc(16px + ${safeBottom})` }}/>
+      </div>
+    </div>
+  );
+
+  /* ── Entry row ──────────────────────────────────────────────────────── */
+  function Row({ entry, isDraft, onTap, onDelete }) {
+    const isEmpty = isDraft && !entry.text;
+    return (
+      <div className="tap-row"
+        style={{ display:"flex", alignItems:"flex-start", borderBottom:`1px solid ${T.hairline}` }}>
+        <div className="tap-target" onClick={onTap}
+          style={{ flex:1, padding:"18px 0", cursor:"pointer", transition:"opacity 0.1s", minWidth:0 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:6 }}>
+            <Icon name={TYPE_ICON[entry.type]} size={24} color={T.muted}/>
+            <span style={{ fontSize:13, color:T.muted, letterSpacing:"0.04em" }}>
+              {entry.date} · {entry.time}
+            </span>
+          </div>
+          <div style={{
+            fontSize:18, lineHeight:1.5, fontWeight:400,
+            color: isEmpty ? T.muted : T.text,
+            fontStyle: isEmpty ? "italic" : "normal",
+            whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis",
+          }}>
+            {entry.text || "empty draft"}
+          </div>
+        </div>
+        <button className="btn-icon" onClick={onDelete}
+          style={{ width:44, height:44, background:"none", border:"none", cursor:"pointer",
+                   display:"flex", alignItems:"center", justifyContent:"center",
+                   flexShrink:0, alignSelf:"center" }}>
+          <Icon name="x" size={19} color={T.muted2}/>
+        </button>
+      </div>
+    );
+  }
+
+  function Empty({ msg }) {
+    return <div style={{ textAlign:"center", padding:"64px 0", color:T.muted, fontSize:17 }}>{msg}</div>;
+  }
+
+  /* ── Settings ───────────────────────────────────────────────────────── */
+  const settingsScreen = (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", paddingTop:safeTop, background:T.bg }}>
+      <TopNav active="settings"/>
+      <div className="scroll-list" style={{ flex:1, padding:"0 24px" }}>
+
+        <SRow label="appearance">
+          <div style={{ display:"flex", gap:16 }}>
+            {["light","dark"].map(opt => {
+              const active = (opt === "dark") === dark;
+              return (
+                <button key={opt} className="btn-text" onClick={() => setDark(opt === "dark")}
+                  style={{ ...textBtn(active, { size:17, underline:true }) }}>
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        </SRow>
+
+        <SRow label="start on">
+          <div style={{ display:"flex", gap:16 }}>
+            {["write","archive"].map(opt => {
+              const active = startOn.toLowerCase() === opt;
+              return (
+                <button key={opt} className="btn-text" onClick={() => setStartOn(opt.charAt(0).toUpperCase()+opt.slice(1))}
+                  style={{ ...textBtn(active, { size:17, underline:true }) }}>
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        </SRow>
+
+        <SRow label="export">
+          <button className="btn-text" onClick={exportXLSX}
+            style={{
+              ...textBtn(published.length > 0, { size:17 }),
+              display:"flex", alignItems:"center", gap:6,
+              opacity: published.length > 0 ? 1 : 0.3,
+              cursor: published.length > 0 ? "pointer" : "default",
+            }}>
+            <Icon name="export" size={17} color={published.length > 0 ? T.text : T.muted}/>
+            download
+          </button>
+        </SRow>
+
+        <SRow label="import">
+          <label className="btn-text"
+            style={{
+              ...textBtn(true, { size:17 }),
+              display:"flex", alignItems:"center", gap:6, cursor:"pointer",
+            }}>
+            <Icon name="upload" size={17} color={T.text}/>
+            upload
+            <input type="file" accept=".xlsx,.xls" onChange={importXLSX}
+              style={{ display:"none" }}/>
+          </label>
+        </SRow>
+
+        <div style={{ padding:"40px 0 0", color:T.muted, fontSize:11, letterSpacing:"0.06em" }}>
+          journal · v0.1
+        </div>
+        <div style={{ height:`calc(16px + ${safeBottom})` }}/>
+      </div>
+    </div>
+  );
+
+  function SRow({ label, note, children }) {
+    return (
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center",
+                    padding:"18px 0", borderBottom:`1px solid ${T.border}` }}>
+        <div>
+          <div style={{ fontSize:17, color:T.text, letterSpacing:"0.02em" }}>{label}</div>
+          {note && <div style={{ fontSize:16, color:T.muted, marginTop:3, letterSpacing:"0.03em" }}>{note}</div>}
+        </div>
+        {children}
+      </div>
+    );
+  }
+
+  /* ── Top Nav (shared) ───────────────────────────────────────────────── */
+  function TopNav({ active }) {
+    // active: "write" | "archive" | "settings"
+    const items = [
+      { id:"write",    icon:"write",    fn: startNew },
+      { id:"archive",  icon:"archive",  fn: goArchive },
+      { id:"settings", icon:"settings", fn: goSettings },
+    ];
+    return (
+      <div style={{ display:"flex", justifyContent:"flex-end", alignItems:"center",
+                    padding:"14px 24px 0", flexShrink:0 }}>
+        <div style={{ display:"flex", gap:20, alignItems:"center" }}>
+          {items.map(({ id, icon, fn }) => {
+            const isActive = active === id;
+            return (
+              <button key={id} className="btn-icon" onClick={fn}
+                style={{
+                  background:"none", border:"none", cursor:"pointer",
+                  display:"flex", flexDirection:"column", alignItems:"center", gap:4,
+                  padding:0,
+                }}>
+                <Icon name={icon} size={23} color={isActive ? T.text : T.muted}/>
+                <div style={{
+                  width:16, height:1.5,
+                  background: isActive ? T.text : "transparent",
+                }}/>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Delete sheet ───────────────────────────────────────────────────── */
+  const deleteSheet = (
+    <div className="overlay" onClick={() => { setConfirmId(null); setConfirmType(null); }}
+      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.3)", zIndex:50,
+               display:"flex", alignItems:"flex-end" }}>
+      <div className="sheet" onClick={e => e.stopPropagation()}
+        style={{ width:"100%", background:T.bg,
+                 borderTop:`1px solid ${T.border}`,
+                 paddingBottom:`calc(28px + ${safeBottom})` }}>
+        <div style={{ display:"flex", justifyContent:"center", padding:"14px 0 16px" }}>
+          <div style={{ width:32, height:3, borderRadius:2, background:T.muted2 }}/>
+        </div>
+        <p style={{ fontSize:17, color:T.muted, padding:"0 32px 16px", textAlign:"center" }}>
+          delete this {confirmType === "draft" ? "draft" : "entry"}?
+        </p>
+        <div style={{ height:1, background:T.border }}/>
+        <button className="btn-text" onClick={executeDelete}
+          style={{ width:"100%", padding:"16px 0", background:"none", border:"none",
+                   color:T.danger, fontSize:18, fontWeight:500, cursor:"pointer",
+                   fontFamily:"inherit", letterSpacing:"0.03em" }}>
+          delete
+        </button>
+        <div style={{ height:1, background:T.border }}/>
+        <button className="btn-text" onClick={() => { setConfirmId(null); setConfirmType(null); }}
+          style={{ width:"100%", padding:"16px 0", background:"none", border:"none",
+                   color:T.muted, fontSize:18, fontWeight:400, cursor:"pointer",
+                   fontFamily:"inherit", letterSpacing:"0.03em" }}>
+          cancel
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ width:"100%", height:"100%", background:T.bg, color:T.text,
+                  display:"flex", flexDirection:"column", overflow:"hidden" }}>
+      {screen === SCREENS.WRITE    && writeScreen}
+      {screen === SCREENS.ARCHIVE  && archiveScreen}
+      {screen === SCREENS.SETTINGS && settingsScreen}
+      {confirmId                   && deleteSheet}
+      {toast && (
+        <div style={{ position:"fixed", bottom:100, left:"50%", transform:"translateX(-50%)",
+                      background:T.text, color:T.bg, fontSize:16, padding:"8px 20px",
+                      borderRadius:20, letterSpacing:"0.04em", zIndex:60,
+                      animation:"fadeIn 0.16s ease forwards", pointerEvents:"none" }}>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
+}
+</script>
+
+</body>
+</html>
