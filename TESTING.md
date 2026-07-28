@@ -5,14 +5,19 @@ The browser items below are covered by an automated pass driven through a
 real targets rather than calling functions. Everything marked **hardware** still
 needs a real iPad/iPhone.
 
-## verified on a phone-sized touch viewport — 50 checks, all passing
+## verified on a phone-sized touch viewport — 57 checks, all passing
 
 **the interface**
 - [x] sheets receive taps (asserted via `elementFromPoint`) — the v1 regression
       where `#overlay` painted over the panel and ate every tap
 - [x] action bar swaps with the selection: nothing / text / shape / photo
-- [x] bar scrolls with a faded trailing edge when it overflows
-- [x] sheet stack: layers → background colour → back chevron returns to layers
+- [x] `add` leads every selected-object bar — adding never needs a hidden deselect
+- [x] the whole bar fits: 393px in 393px, nothing off-screen
+- [x] **sheets cover 0% of the selected object** (colour and font were both 100%)
+- [x] the bar stays live above an open sheet, so controls swap without closing
+- [x] the canvas returns to its prior position when a sheet closes
+- [x] size and corners are inline sliders: no sheet, no dimming
+- [x] `edit` enters text editing; the bar becomes an editing state with `done`
 - [x] no horizontal page overflow at 393px
 
 **colour** (paramount)
@@ -31,9 +36,11 @@ needs a real iPad/iPhone.
 - [x] weight + italic segmented control follows the family's real axes
 - [x] "load any google font by name" field present and wired
 - [x] a slow load says so rather than appearing to do nothing
+- [x] the font list stays clear of the text it is restyling
 
 **erase object** (paramount)
 - [x] opens from the photo's action bar
+- [x] the instruction is visible on a phone (it used to be hidden under 560px)
 - [x] paint / unpaint / undo / clear on the mask
 - [x] Telea inpaint runs in the worker and the target object is **gone from the
       actual pixels** (asserted: zero bright pixels remain where it was)
@@ -64,7 +71,8 @@ needs a real iPad/iPhone.
 - [ ] offline relaunch after a first visit, including previously used google fonts
 - [ ] erase brush feel with finger and Apple Pencil; inpaint time on a large photo
       (region-limited, but a big mask on a 4096px photo is the worst case)
-- [ ] the bar's horizontal scroll is discoverable in practice, not just visible
+- [ ] the pan-into-view on sheet open feels helpful rather than jumpy on device
+- [ ] inline sliders are comfortable to drag one-handed at the bottom of the screen
 
 ## running the tests
 
