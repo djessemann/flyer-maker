@@ -85,6 +85,39 @@ needs a real iPad/iPhone.
 
 ## running the tests
 
-`node mobile.mjs` from the scratchpad drives the whole suite; it shims the two
-CDN modules from local tarballs and stubs Google Fonts with a real installed
-face so the font-loading path is genuinely exercised.
+```
+npm install
+npx playwright install chromium   # skip if a chromium is already on the machine
+npm test
+```
+
+Three suites, 87 checks:
+
+| suite | what it covers |
+|---|---|
+| `tests/inpaint.test.mjs` | the object-removal maths against ground truth, no browser |
+| `tests/offline.test.mjs` | service worker registration, shell caching, offline reload |
+| `tests/mobile.test.mjs` | the whole app on a 393×800 touch viewport |
+
+`npm run audit` is not pass/fail — it prints the interaction costs and geometry
+that `docs/ui-revision.md` makes claims about, so those claims can be re-measured
+rather than trusted.
+
+The suites serve the repo over http and answer the app's two CDN imports with the
+same **pinned** versions out of `node_modules`, so they run with no network. If the
+import URLs in `js/` and the pins in `package.json` ever drift apart, the mobile
+suite fails on the first assertion rather than quietly testing a build nobody ships.
+
+`tests/mobile.test.mjs` blocks service workers on purpose — an active worker makes
+its own fetches, which route interception cannot reach, so the CDN shims would be
+bypassed. That is why offline lives in its own suite.
+
+CI runs all of it on every push and pull request (`.github/workflows/test.yml`).
+
+## independent QA agents
+
+`docs/qa-charter.md` briefs a Claude instance that did **not** build this app to
+use it like a person and file findings as GitHub issues labelled `qa-agent`. It is
+deliberately pointed at the design doc and at real user goals rather than at
+`tests/` — the suite is a regression net, not the spec, and twice now it has passed
+while a feature was visibly broken.

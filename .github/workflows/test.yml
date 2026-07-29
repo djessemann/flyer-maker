@@ -1,0 +1,37 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: install
+        run: npm ci || npm install
+
+      - name: install chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: run the suites
+        run: npm test
+
+      - name: keep the screenshots from a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-screenshots
+          path: tests/output/
+          if-no-files-found: ignore
+          retention-days: 7

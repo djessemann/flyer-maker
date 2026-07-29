@@ -1,0 +1,17 @@
+{
+  "name": "pasteup",
+  "private": true,
+  "type": "module",
+  "description": "a flyer editor for the browser — the app itself has no build step; this file exists only for the test harness",
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "test:mobile": "node tests/mobile.test.mjs",
+    "test:inpaint": "node tests/inpaint.test.mjs",
+    "audit": "node tests/ux-audit.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1",
+    "fabric": "6.9.1",
+    "idb-keyval": "6.3.0"
+  }
+}
