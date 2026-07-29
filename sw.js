@@ -16,6 +16,14 @@ const SHELL = [
   './manifest.webmanifest',
   './icon.svg',
 ];
+// The app imports these at boot. Module imports on a first visit happen before
+// this worker activates, so runtime caching alone never captures them and an
+// offline relaunch could not load the canvas engine. Precache them by exact URL.
+// tests/offline.test.mjs asserts these stay in step with the imports in js/.
+const CDN_MODULES = [
+  'https://cdn.jsdelivr.net/npm/fabric@6.9.1/dist/index.min.mjs',
+  'https://cdn.jsdelivr.net/npm/idb-keyval@6.3.0/+esm',
+];
 const RUNTIME_HOSTS = ['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com'];
 
 self.addEventListener('install', e => {
@@ -30,8 +38,22 @@ self.addEventListener('activate', e => {
   e.waitUntil((async () => {
     for (const k of await caches.keys()) if (k !== VERSION) await caches.delete(k);
     await self.clients.claim();
+    // Deliberately not awaited, and time-boxed: a slow or unreachable CDN must
+    // never hold up activation or leave the worker installing forever.
+    warmCDN();
   })());
 });
+
+async function warmCDN() {
+  const cache = await caches.open(VERSION);
+  await Promise.allSettled(CDN_MODULES.map(async u => {
+    if (await cache.match(u)) return;
+    try {
+      const res = await fetch(u, { signal: AbortSignal.timeout(8000) });
+      if (res && res.ok) await cache.put(u, res);
+    } catch {}
+  }));
+}
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
