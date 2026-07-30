@@ -288,7 +288,7 @@ export const canUndo = () => ed.undoStack.length > 1;
 export const canRedo = () => ed.redoStack.length > 0;
 
 export async function undo() {
-  if (ed.busy) { emit('toast', 'hang on — finishing the last change'); return; }
+  if (ed.busy) { emit('toast', 'hang on — finishing that'); return; }
   if (!canUndo()) return;
   clearTimeout(snapTimer);
   ed.redoStack.push(ed.undoStack.pop());
@@ -296,7 +296,7 @@ export async function undo() {
 }
 
 export async function redo() {
-  if (ed.busy) { emit('toast', 'hang on — finishing the last change'); return; }
+  if (ed.busy) { emit('toast', 'hang on — finishing that'); return; }
   if (!canRedo()) return;
   const s = ed.redoStack.pop();
   ed.undoStack.push(s);
@@ -525,7 +525,7 @@ export async function addImageFromFile(file) {
     emit('toast', "couldn't read that photo — try a jpeg or png");
     return null;
   }
-  if (data.scaled) emit('toast', 'large photo scaled down to 4096px');
+  if (data.scaled) emit('toast', 'photo scaled down to 4096px');
   const img = await fabric.FabricImage.fromURL(data.url);
   const s = Math.min(ed.docW / img.width, ed.docH / img.height);
   img.set({

@@ -5,7 +5,9 @@ import { ed, swapImageSource } from './editor.js';
 import { showToast } from './ui.js';
 
 const $ = s => document.querySelector(s);
-const HINT = 'paint over what you want gone, then tap “erase it”. works best on small things against plain backgrounds.';
+// one line doing both jobs: what to do, and where it works. This algorithm
+// smears on texture, and finding that out afterwards is worse than reading it.
+const HINT = 'paint over small things on plain backgrounds';
 
 let worker = null, ready = null;
 let obj = null;          // fabric image being worked on
@@ -48,7 +50,7 @@ export function initRetouch() {
   on('doc:restored', () => {
     if ($('#retouch').classList.contains('on')) {
       close();
-      showToast('closed erase — the flyer was undone underneath it');
+      showToast('erase closed — that photo was undone');
     }
   });
   $('#rtCancel').addEventListener('click', close);
@@ -171,7 +173,7 @@ function open(image) {
   zoom = 1; panX = 0; panY = 0;
   layout();
   drawDot();
-  ensureWorker().catch(err => showToast('erase engine problem: ' + err.message));
+  ensureWorker().catch(err => showToast("couldn't start erase: " + err.message));
 }
 
 function layout() {
@@ -226,7 +228,7 @@ async function undoMask() {
   clearMask();
   await pushToLayer();
   $('#rtHint').textContent = HINT;
-  showToast('erase undone');
+  showToast('undone');
 }
 
 async function pushToLayer() {
@@ -373,7 +375,7 @@ async function run() {
     clearMask();
 
     await pushToLayer();
-    $('#rtHint').textContent = 'gone. paint over anything else you want removed.';
+    $('#rtHint').textContent = 'gone';
     showToast('erased');
   } catch (err) {
     $('#rtHint').textContent = HINT;
