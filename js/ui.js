@@ -4,7 +4,7 @@ import { on, emit } from './bus.js';
 import {
   ed, fabric, PRESETS, layerName, markDirty,
   addText, addShape, addImageFromFile, replaceImage, resetImageSize,
-  duplicateObject, deleteObject, reorder, setLocked, setVisible,
+  duplicateObject, deleteObject, reorder, setLocked, setVisible, nudge,
   resizeDoc, setBg, collectDocColors, maxExportScale, tuneAllHandles,
   renderPNGBlob, exportFilename, projectBlob, projectFilename, saveFile,
 } from './editor.js';
@@ -37,6 +37,8 @@ const I = {
   font: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M2 16 L6.5 4 L11 16 M3.4 12.4 H9.6"/><path d="M17.5 9.6 a3 3 0 0 0-5.6 1.2 M17.5 8.5 V16 M17.5 12.6 a2.6 2.6 0 1 1-5.2 .4 a2.6 2.6 0 0 1 5.2-.4Z"/></svg>',
   size: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M1.5 15.5 L5.5 6 L9.5 15.5 M2.7 12.9 H8.3"/><path d="M12 15.5 L15 8.5 L18 15.5 M12.9 13.6 H17.1"/></svg>',
   erase: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M9.5 3.5 L16.5 10.5 L11 16 L4 9 Z"/><path d="M6.5 11.5 H16"/><path d="M2.5 17.5 H10"/></svg>',
+  crop: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M5.5 1.5 V14.5 H18.5"/><path d="M1.5 5.5 H14.5 V18.5"/></svg>',
+  move: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 2.5 V17.5 M2.5 10 H17.5"/><path d="M10 2.5 L7.5 5 M10 2.5 L12.5 5 M10 17.5 L7.5 15 M10 17.5 L12.5 15 M2.5 10 L5 7.5 M2.5 10 L5 12.5 M17.5 10 L15 7.5 M17.5 10 L15 12.5"/></svg>',
   replace: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M3 7.5 H14 M11 4.5 L14 7.5 L11 10.5"/><path d="M17 12.5 H6 M9 9.5 L6 12.5 L9 15.5"/></svg>',
   adjust: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 2.5 V17.5"/><path d="M7.5 6 L2.5 10 L7.5 14 Z"/><path d="M12.5 6 L17.5 10 L12.5 14 Z"/></svg>',
   stroke: '<svg viewBox="0 0 20 20" width="20" height="20"><rect x="3" y="3" width="14" height="14" stroke-width="3"/></svg>',
@@ -272,13 +274,18 @@ export function renderBar() {
       act('font', I.font, 'font') +
       actDot('fill', o.fill, 'color') +
       act('size', I.size, 'size') +
+      act('move', I.move, 'move') +
       act('more', I.more, 'more');
   } else if (o.pKind === 'image') {
+    // crop before erase: trimming a photo is the everyday job, erasing an object
+    // is the occasional one — and it used to be the loudest button on the bar
     html =
       act('add', I.plus, 'add') +
-      act('erase', I.erase, 'erase', 'primary') +
-      act('replace', I.replace, 'replace') +
+      act('crop', I.crop, 'crop') +
       act('adjust', I.adjust, 'adjust') +
+      act('replace', I.replace, 'replace') +
+      act('erase', I.erase, 'erase') +
+      act('move', I.move, 'move') +
       act('more', I.more, 'more');
   } else {
     const isLine = o.pKind === 'line';
@@ -288,6 +295,7 @@ export function renderBar() {
       (isLine ? '' : actDot('fill', o.fill, 'fill')) +
       actDot('stroke', o.stroke || '#ffffff', isLine ? 'color' : 'stroke') +
       (isRect ? act('corners', I.radius, 'corners') : '') +
+      act('move', I.move, 'move') +
       act('more', I.more, 'more');
   }
 
@@ -334,12 +342,12 @@ async function runAction(key, o) {
   sheetOwner = o && o.pKind !== 'bg' ? o : null;
   // the bar stays live above an open sheet — tapping another action swaps the
   // sheet rather than stacking, so you can move colour → font → size freely
-  const SHEETY = ['add', 'add-shape', 'layers', 'canvas', 'font', 'fill', 'stroke', 'adjust', 'more'];
+  const SHEETY = ['add-shape', 'layers', 'canvas', 'font', 'fill', 'stroke', 'adjust', 'more'];
   if (SHEETY.includes(key)) stack.length = 0;
-  if (key === 'size' || key === 'corners') hideSheet();
+  if (key === 'size' || key === 'corners' || key === 'add' || key === 'move') hideSheet();
 
   switch (key) {
-    case 'add': sheetAdd(); break;
+    case 'add': inlineAdd(); break;
     case 'add-text': addText(); break;
     case 'add-photo': pickImage(f => addImageFromFile(f)); break;
     case 'add-shape': sheetShapes(); break;
@@ -375,7 +383,9 @@ async function runAction(key, o) {
       });
       break;
 
+    case 'move': inlineNudge(o); break;
     case 'erase': emit('retouch:open', o); break;
+    case 'crop': emit('crop:open', o); break;
     case 'replace': pickImage(f => replaceImage(o, f)); break;
     case 'adjust': sheetAdjust(o); break;
     case 'more': sheetMore(o); break;
@@ -398,21 +408,86 @@ function pickImage(fn) {
   input.click();
 }
 
-/* ================= sheet: add ================= */
+/* ================= add: in the bar, not a sheet ================= */
 
-function sheetAdd() {
-  const html = `
-    <button class="srow" data-x="text">${I.text}text</button>
-    <button class="srow" data-x="photo">${I.photo}photo</button>
-    <button class="srow" data-x="shape">${I.shape}shape</button>`;
-  openSheet('add to your flyer', html, root => {
-    root.querySelectorAll('[data-x]').forEach(b => b.addEventListener('click', () => {
-      const x = b.dataset.x;
-      closeSheet();
-      if (x === 'text') addText();
-      if (x === 'photo') pickImage(f => addImageFromFile(f));
-      if (x === 'shape') sheetShapes();
-    }));
+// with a layer selected, "add" used to open a sheet listing the same three verbs
+// the empty bar shows directly — a sheet over the flyer to reach a menu. Now the
+// bar itself becomes the three verbs, so the second tap is where your thumb is.
+function inlineAdd() {
+  const bar = $('#actionbar');
+  inlineOpen = true;
+  bar.classList.add('inline-mode');
+  bar.innerHTML = `
+    <div class="inline">
+      <span class="inline-l">add</span>
+      <button class="pill ghost" data-x="text">text</button>
+      <button class="pill ghost" data-x="photo">photo</button>
+      <button class="pill ghost" data-x="shape">shape</button>
+      <span class="spacer"></span>
+      <button class="inline-done" data-done>✕</button>
+    </div>`;
+  const leave = () => { inlineOpen = false; bar.classList.remove('inline-mode'); renderBar(); };
+  bar.querySelectorAll('[data-x]').forEach(b => b.addEventListener('click', () => {
+    const x = b.dataset.x;
+    leave();
+    if (x === 'text') addText();
+    if (x === 'photo') pickImage(f => addImageFromFile(f));
+    if (x === 'shape') sheetShapes();
+  }));
+  bar.querySelector('[data-done]').addEventListener('click', leave);
+}
+
+/* ================= move: nudge without a keyboard ================= */
+
+// a finger drag on a small layer grabs its handles, and on a phone there is no
+// arrow key. Four buttons and a step toggle place anything exactly.
+function inlineNudge(o) {
+  const bar = $('#actionbar');
+  inlineOpen = true;
+  bar.classList.add('inline-mode');
+  let step = 1;
+  bar.innerHTML = `
+    <div class="inline tight">
+      <span class="inline-l">move</span>
+      <div class="nudge">
+        <button data-n="left" aria-label="left">←</button>
+        <button data-n="up" aria-label="up">↑</button>
+        <button data-n="down" aria-label="down">↓</button>
+        <button data-n="right" aria-label="right">→</button>
+      </div>
+      <button class="pill ghost" data-step>1px</button>
+      <span class="spacer"></span>
+      <button class="inline-done" data-done>done</button>
+    </div>`;
+
+  const D = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] };
+  const go = dir => {
+    if (!ed.canvas.getObjects().includes(o)) return;
+    ed.canvas.setActiveObject(o);
+    nudge(D[dir][0] * step, D[dir][1] * step);
+  };
+
+  // hold to keep going, so crossing the flyer doesn't take fifty taps
+  bar.querySelectorAll('[data-n]').forEach(b => {
+    let timer = null, repeat = null;
+    const stop = () => { clearTimeout(timer); clearInterval(repeat); timer = repeat = null; };
+    b.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      go(b.dataset.n);
+      timer = setTimeout(() => { repeat = setInterval(() => go(b.dataset.n), 60); }, 380);
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => b.addEventListener(ev, stop));
+  });
+
+  const sb = bar.querySelector('[data-step]');
+  sb.addEventListener('click', () => {
+    step = step === 1 ? 10 : step === 10 ? 50 : 1;
+    sb.textContent = step + 'px';
+  });
+  bar.querySelector('[data-done]').addEventListener('click', () => {
+    inlineOpen = false;
+    bar.classList.remove('inline-mode');
+    renderBar();
   });
 }
 
@@ -819,15 +894,19 @@ function sheetMore(o) {
         <div class="lbl"><span>letter spacing</span><span class="val" data-lso>${((o.charSpacing || 0) / 1000).toFixed(2)}em</span></div>
         <input type="range" min="-60" max="500" value="${o.charSpacing || 0}" data-ls>
       </div>
+      <div class="sheet-div"></div>` : '';
+
+    // centring used to be inside the text-only block, so a photo or a shape
+    // could not be centred at all
+    const posBits = `
       <div class="group">
         <div class="rowbtns">
           <button class="pill ghost" data-pos="cx">centre across</button>
           <button class="pill ghost" data-pos="cy">centre down</button>
         </div>
-      </div>
-      <div class="sheet-div"></div>` : '';
+      </div>`;
 
-    const html = `${textBits}
+    const html = `${textBits}${posBits}
       <div class="group">
         <div class="lbl"><span>opacity</span><span class="val" data-opo>${op}%</span></div>
         <input type="range" min="0" max="100" value="${op}" data-op>

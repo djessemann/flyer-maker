@@ -23,7 +23,8 @@ css/app.css
 js/app.js             boot, home screen, top bar, keyboard
 js/ui.js              contextual action bar + every sheet (colour, font, layers, canvas, export)
 js/editor.js          fabric canvas, gestures, undo, autosave, export
-js/retouch.js         erase-object mode
+js/retouch.js         erase-object mode (zoom, pan, progress)
+js/crop.js            crop mode
 js/inpaint-worker.js  telea inpainting, no dependencies
 js/fonts.js  js/store.js  js/bus.js
 vendor/               fabric + idb-keyval, pinned, served from the repo

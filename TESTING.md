@@ -5,18 +5,23 @@ The browser items below are covered by an automated pass driven through a
 real targets rather than calling functions. Everything marked **hardware** still
 needs a real iPad/iPhone.
 
-## verified — 123 checks across four suites, all passing
+## verified — 153 checks across four suites, all passing
 
 **the interface**
 - [x] sheets receive taps (asserted via `elementFromPoint`) — the v1 regression
       where `#overlay` painted over the panel and ate every tap
 - [x] action bar swaps with the selection: nothing / text / shape / photo
 - [x] `add` leads every selected-object bar — adding never needs a hidden deselect
+- [x] `add` expands **inside the bar** (text/photo/shape); no sheet covers the flyer
+      to reach the same three verbs the empty bar already shows
 - [x] the whole bar fits: 393px in 393px, nothing off-screen
 - [x] **sheets cover 0% of the selected object** (colour and font were both 100%)
 - [x] the bar stays live above an open sheet, so controls swap without closing
 - [x] the canvas returns to its prior position when a sheet closes
 - [x] size and corners are inline sliders: no sheet, no dimming
+- [x] `move` is an inline nudge pad: 1px per tap, step toggles 1/10/50, four 44px
+      targets, and the whole row fits in 393px without clipping `done`
+- [x] `erase` is not the primary-styled button on the photo bar any more
 - [x] `edit` enters text editing; the bar becomes an editing state with `done`
 - [x] no horizontal page overflow at 393px
 
@@ -38,8 +43,26 @@ needs a real iPad/iPhone.
 - [x] a slow load says so rather than appearing to do nothing
 - [x] the font list stays clear of the text it is restyling
 
+**crop** (photos)
+- [x] opens from the photo's action bar; live readout of the pixels being kept
+- [x] corner drag, whole-rect drag, and a fresh rect drawn from the dimmed area
+- [x] **the kept region does not shift on the flyer** — a landmark pixel of the
+      photo stays at the same flyer coordinate to within 2px after a crop taken
+      from the middle of the image (the whole risk in cropping)
+- [x] the photo's pixels really are trimmed, and the cropped photo fills its box
+      in the export (6 of 9 sampled points are the photo's own colour)
+- [x] undo restores the uncropped photo — crop is not a one-way door
+- [x] aspect locks are exact: square is square, "flyer" matches the canvas ratio
+- [x] cancel changes nothing; "crop it" with nothing trimmed says so
+
 **erase object** (paramount)
 - [x] opens from the photo's action bar
+- [x] zoom in/out/fit, and a stroke painted while zoomed lands where the finger
+      was (within 60 native px of the target) — at fit zoom a 4096px photo shows
+      at ~9%, so nothing finer than a ~116px blob could be masked at all
+- [x] brush size is in image pixels, unchanged by zooming
+- [x] progress counts up while a fill runs, observed through the live DOM rather
+      than asserted from the source
 - [x] the instruction is visible on a phone (it used to be hidden under 560px)
 - [x] paint / unpaint / undo / clear on the mask
 - [x] Telea inpaint runs in the worker and the target object is **gone from the
@@ -69,7 +92,8 @@ needs a real iPad/iPhone.
 - [x] project file saves; the photo picker actually opens
 - [x] autosave → reload → project listed → reopen with every layer intact
 - [x] undo / redo restores real values; ⌘Z survives a focused slider
-- [x] arrow nudge is exactly 1px, shift+arrow exactly 10px
+- [x] arrow nudge is exactly 1px, shift+arrow exactly 10px; the on-screen nudge
+      pad moves exactly 1px and exactly 10px too
 - [x] rename by tap (a finger never fires `dblclick`) and it persists
 - [x] layers stay inside the frame when the canvas size changes
 - [x] handles stay proportional so dragging a small layer moves rather than scales it
@@ -90,6 +114,9 @@ needs a real iPad/iPhone.
 - [ ] offline relaunch after a first visit, including previously used google fonts
 - [ ] erase brush feel with finger and Apple Pencil; inpaint time on a large photo
       (region-limited, but a big mask on a 4096px photo is the worst case)
+- [ ] pinch-to-zoom inside erase mode: it is covered by a synthetic two-finger
+      CDP gesture, which says the maths is right but nothing about how it feels
+- [ ] crop handles with a fingertip — 44px hit areas hanging outside the photo
 - [ ] the pan-into-view on sheet open feels helpful rather than jumpy on device
 - [ ] inline sliders are comfortable to drag one-handed at the bottom of the screen
 
