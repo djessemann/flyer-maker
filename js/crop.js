@@ -20,7 +20,7 @@ export function initCrop() {
   on('doc:restored', () => {
     if ($('#crop').classList.contains('on')) {
       close();
-      showToast('closed crop — the flyer was undone underneath it');
+      showToast('crop closed — that photo was undone');
     }
   });
   $('#cpCancel').addEventListener('click', close);
@@ -126,8 +126,8 @@ function paint() {
   r.style.width = box.w + 'px';
   r.style.height = box.h + 'px';
   const n = toNative(box);
-  $('#cpHint').textContent =
-    `keeping ${Math.round(n.w)} × ${Math.round(n.h)} px — drag the corners or the picture itself`;
+  // just the number: corner brackets on a dimmed photo already say "drag me"
+  $('#cpHint').textContent = `${Math.round(n.w)} × ${Math.round(n.h)} px`;
 }
 
 // display px -> native px. The fitted size is rounded to whole screen pixels, so
@@ -221,7 +221,7 @@ async function apply() {
   const x = Math.round(n.x), y = Math.round(n.y);
   if (w >= native.width && h >= native.height) {
     close();
-    showToast('nothing trimmed — drag a corner in first');
+    showToast('nothing trimmed');
     return;
   }
 
@@ -242,7 +242,7 @@ async function apply() {
 
   await cropImageSource(target, url, { x, y });
   close();
-  showToast(`cropped to ${w} × ${h}`);
+  showToast('cropped');
 }
 
 function close() {

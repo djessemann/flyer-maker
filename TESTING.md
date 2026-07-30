@@ -8,8 +8,9 @@ needs a real iPad/iPhone.
 ## verified — 153 checks across four suites, all passing
 
 **the interface**
-- [x] sheets receive taps (asserted via `elementFromPoint`) — the v1 regression
-      where `#overlay` painted over the panel and ate every tap
+- [x] sheets receive taps (asserted via `elementFromPoint`, after waiting for the
+      sheet to finish rising) — the v1 regression where `#overlay` painted over
+      the panel and ate every tap
 - [x] action bar swaps with the selection: nothing / text / shape / photo
 - [x] `add` leads every selected-object bar — adding never needs a hidden deselect
 - [x] `add` expands **inside the bar** (text/photo/shape); no sheet covers the flyer
@@ -19,6 +20,9 @@ needs a real iPad/iPhone.
 - [x] the bar stays live above an open sheet, so controls swap without closing
 - [x] the canvas returns to its prior position when a sheet closes
 - [x] size and corners are inline sliders: no sheet, no dimming
+- [x] copy carries no explanation a control doesn't need: the crop readout is
+      `1840 × 1035 px` and nothing else, and no sheet explains what its own
+      button does
 - [x] `move` is an inline nudge pad: 1px per tap, step toggles 1/10/50, four 44px
       targets, and the whole row fits in 393px without clipping `done`
 - [x] `erase` is not the primary-styled button on the photo bar any more

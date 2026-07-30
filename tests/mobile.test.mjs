@@ -61,10 +61,18 @@ await exposeEd();
 // ---------- home ----------
 ok(await page.locator('#btnNew').isVisible(), 'home: new flyer button visible');
 await tap('#btnNew');
+// wait for the sheet to finish sliding up before reading a point on it: mid
+// transition its top is still below the viewport and elementFromPoint returns
+// null, which made this check fail at random rather than on a real regression
+await pollUntil(page, () => {
+  const s = document.querySelector('#sheet').getBoundingClientRect();
+  return s.top < innerHeight - 80;
+}, 4000);
 const stacking = await page.evaluate(() => {
   const s = document.querySelector('#sheet').getBoundingClientRect();
+  if (s.top >= innerHeight - 80) return 'sheet never came up (top ' + Math.round(s.top) + ')';
   const el = document.elementFromPoint(s.left + s.width/2, s.top + 40);
-  return el && el.closest('#sheet') ? 'sheet' : (el && (el.id || el.className));
+  return el && el.closest('#sheet') ? 'sheet' : (el && (el.id || el.className) || 'nothing');
 });
 ok(stacking === 'sheet', 'sheet receives taps, not covered by overlay: ' + stacking);
 await tap('[data-p="ig-post"]');
@@ -290,8 +298,9 @@ const dragBy = async (sel, dx, dy) => {
 const preCrop = await landmarkAt(400, 300);
 await tap('[data-a="crop"]');
 ok(await page.locator('#crop').isVisible(), 'crop mode opens');
-ok(/keeping \d+ × \d+ px/.test(await page.locator('#cpHint').textContent()),
-   'crop says how many pixels you are keeping: ' + (await page.locator('#cpHint').textContent()));
+ok(/^\d+ × \d+ px$/.test((await page.locator('#cpHint').textContent()).trim()),
+   'crop reads out the pixels being kept, and nothing else: ' +
+   (await page.locator('#cpHint').textContent()));
 await dragBy('.cp-h[data-h="nw"]', 55, 40);
 await dragBy('.cp-h[data-h="se"]', -30, -25);
 const cropped = await page.locator('#cpHint').textContent();

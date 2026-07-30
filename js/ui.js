@@ -497,7 +497,7 @@ function sheetShapes() {
     <button class="srow" data-k="rounded"><svg viewBox="0 0 20 20" width="20" height="20"><rect x="2.5" y="4" width="15" height="12" rx="4"/></svg>rounded rectangle</button>
     <button class="srow" data-k="ellipse"><svg viewBox="0 0 20 20" width="20" height="20"><circle cx="10" cy="10" r="7"/></svg>circle</button>
     <button class="srow" data-k="line"><svg viewBox="0 0 20 20" width="20" height="20"><path d="M3 16 L17 4"/></svg>line</button>`;
-  openSheet('add a shape', html, root => {
+  openSheet('shape', html, root => {
     root.querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', () => {
       addShape(b.dataset.k);
       closeSheet();
@@ -620,7 +620,7 @@ export function sheetColor(title, initial, onChange, opts = {}) {
       });
       root.querySelector('[data-sample]').addEventListener('click', () => {
         closeSheet();
-        showToast('tap anywhere on the flyer to pick up that colour');
+        showToast('tap the flyer to pick a colour');
         sampling = hex => {
           if (!hex) { showToast("couldn't read that pixel"); return; }
           onChange(hex);
@@ -632,7 +632,6 @@ export function sheetColor(title, initial, onChange, opts = {}) {
           const b2 = build();
           openSheet(title, b2.html, b2.wire, { push: false });
           stack[stack.length - 1].rebuild = build;
-          showToast('picked up ' + hex);
         };
       });
     };
@@ -865,7 +864,6 @@ function sheetAdjust(o) {
       });
       root.querySelector('[data-fit]').addEventListener('click', () => {
         resetImageSize(o);
-        showToast('photo fit to the flyer');
       });
     },
   });
@@ -1009,7 +1007,7 @@ function sheetLayers() {
       </div>`).join('');
 
     // the background lives in the canvas sheet — this row just points there
-    const html = (objs.length ? rows : '<p class="hint" style="padding:14px 8px">nothing on your flyer yet.</p>') + `
+    const html = (objs.length ? rows : '<p class="hint" style="padding:14px 8px">nothing on your flyer yet</p>') + `
       <button class="lrow" data-bgrow style="width:100%">
         <span class="lpick" style="pointer-events:none">
           <span class="lbl" style="width:12px;text-align:center">□</span>
@@ -1137,9 +1135,6 @@ export function sheetExport() {
       </div>
       <div class="group">
         <button class="pill ghost" style="width:100%;padding:14px 0" data-proj>save project file</button>
-        <p class="hint" style="font-size:11.5px;margin-top:10px;line-height:1.5">
-          a project file keeps every layer editable — import it from the home screen to pick up where you left off.
-        </p>
       </div>`;
     const wire = root => {
       root.querySelector('[data-scale]').addEventListener('click', e => {
@@ -1187,16 +1182,12 @@ async function makePNG() {
     ? (blob.size / 1048576).toFixed(1) + ' MB'
     : Math.round(blob.size / 1024) + ' KB';
 
-  openSheet('your png', `
+  openSheet('png', `
     <div class="exp-prev"><img src="${previewURL}" alt="your flyer"></div>
     <p class="lbl" style="text-align:center;margin:12px 0 16px">
       ${ed.docW * scale} × ${ed.docH * scale} · ${size}
     </p>
-    <button class="pill" style="width:100%;padding:15px 0" data-save>save image</button>
-    <p class="hint" style="font-size:11.5px;margin-top:12px;line-height:1.55">
-      on iphone and ipad this opens the share sheet — choose “save image” to put it
-      in your photos. you can also press and hold the picture above to save it.
-    </p>`,
+    <button class="pill" style="width:100%;padding:15px 0" data-save>save image</button>`,
     root => {
       root.querySelector('[data-save]').addEventListener('click', async () => {
         const r = await saveFile(blob, name);
