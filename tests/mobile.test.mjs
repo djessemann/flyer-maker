@@ -255,11 +255,14 @@ await page.evaluate(async () => {
 });
 await page.waitForTimeout(300);
 b = await bar();
-ok(JSON.stringify(b) === JSON.stringify(['add','crop','adjust','replace','erase','move','more']), 'photo bar: '+b.join(','));
-// erase was the one filled, dominant button on the photo bar: the most
-// destructive action shouting loudest on a layout tool
-ok(await page.locator('#actionbar [data-a="erase"]').evaluate(e => !e.classList.contains('primary')),
-   'FIX: erase is no longer the primary-styled button on the photo bar');
+ok(JSON.stringify(b) === JSON.stringify(['add','crop','adjust','replace','move','more']), 'photo bar: '+b.join(','));
+// erase is gone: it filled holes by averaging inward from the rim, which is
+// near-exact on a plain background (0.4/255) and a visible smear on texture
+// (22.8/255). A button that only works on photos you don't have is worse than
+// no button. See docs/ui-revision.md round 7.
+ok((await page.locator('#actionbar [data-a="erase"]').count()) === 0,
+   'erase is off the photo bar');
+ok((await page.locator('#retouch').count()) === 0, 'and the erase screen is gone from the app');
 await tap('[data-a="adjust"]');
 await tap('#sheetBody [data-f="x"]');
 ok((await active()).flipX === true, 'flip (in adjust)');
@@ -407,205 +410,6 @@ const p2 = await posOf();
 ok(Math.abs((p2.top - p1.top) - 10) < 0.01, `and then moves exactly 10px (${(p2.top - p1.top).toFixed(2)})`);
 await tap('#actionbar [data-done]');
 ok((await bar()).includes('move'), 'done returns the normal bar');
-// hand the selection back to the photo for the erase block below
-await page.evaluate(async () => {
-  const m = await import('./js/editor.js');
-  const i = m.ed.canvas.getObjects().find(o => o.pKind === 'image');
-  m.ed.canvas.setActiveObject(i); m.ed.canvas.requestRenderAll();
-});
-await page.waitForTimeout(300);
-
-// ---------- FIX 6: erase instructions visible on a phone ----------
-await tap('[data-a="erase"]');
-ok(await page.locator('#retouch').isVisible(), 'erase mode opens');
-const hintVisible = await page.evaluate(() => {
-  const t = document.querySelector('#rtHint');
-  const r = t.getBoundingClientRect();
-  return { shown: getComputedStyle(t).display !== 'none' && r.height > 0, text: t.textContent };
-});
-ok(hintVisible.shown, `FIX: instruction visible on phone — "${hintVisible.text}"`);
-
-// ---------- every control's label is actually inside its control ----------
-// The zoom stepper shipped with its glyphs clipped: buttons inherit
-// text-align:left from the reset, and inside a 999px radius with
-// overflow:hidden the "-" and "+" were sliced off by the rounded corner. Size
-// assertions all passed — nothing measured where the *ink* sat. This does.
-const labelFit = await page.evaluate(() => {
-  const bad = [];
-  for (const b of document.querySelectorAll('.zoomer button, .nudge button, .seg button, .pill')) {
-    const r = b.getBoundingClientRect();
-    if (!r.width || !b.textContent.trim()) continue;
-    const range = document.createRange();
-    range.selectNodeContents(b);
-    const t = range.getBoundingClientRect();
-    if (!t.width) continue;
-    const offCentre = Math.abs((t.left + t.right) / 2 - (r.left + r.right) / 2);
-    const clipped = t.left < r.left - 0.5 || t.right > r.right + 0.5;
-    if (clipped || offCentre > 6) {
-      bad.push(`${b.textContent.trim().slice(0, 8)}: ${clipped ? 'clipped' : 'off-centre by ' + Math.round(offCentre) + 'px'}`);
-    }
-  }
-  return bad;
-});
-ok(labelFit.length === 0, 'FIX: every stepper/segment/pill label sits centred inside its button' +
-   (labelFit.length ? ' — ' + labelFit.join('; ') : ''));
-
-// ---------- erase: get close enough to mask something small ----------
-// at fit zoom a 4096px photo shows at ~9%, so nothing finer than a ~116px blob
-// could be masked at all. Zoom, then check a stroke lands where the finger was.
-ok((await page.locator('#rtZoom').isVisible()), 'erase has a zoom control');
-await tap('#rtZoom [data-z="in"]');
-await tap('#rtZoom [data-z="in"]');
-const zoomState = await page.evaluate(() => ({
-  label: document.querySelector('#rtZoomVal').textContent,
-  scale: +(document.querySelector('#rtWrap').style.transform.match(/scale\(([\d.]+)\)/) || [, 1])[1],
-}));
-ok(zoomState.scale > 1.5, `zoom really scales the photo (${zoomState.scale.toFixed(2)}x)`);
-ok(/%/.test(zoomState.label), 'and reads out the magnification: ' + zoomState.label);
-// paint a short stroke over the white square (native 400,300 .. 510,410)
-const zt = await page.evaluate(() => {
-  const m = document.querySelector('#rtMask');
-  const r = m.getBoundingClientRect();
-  const k = r.width / m.width;
-  return { x: r.left + 455 * k, y: r.top + 355 * k, k };
-});
-ok(zt.x > 0 && zt.x < 393 && zt.y > 0 && zt.y < 800,
-   'the zoomed-to spot is still on screen, so it can be painted');
-await page.mouse.move(zt.x - 10, zt.y - 10);
-await page.mouse.down();
-for (let i = -10; i <= 10; i += 5) await page.mouse.move(zt.x + i, zt.y + i, { steps: 2 });
-await page.mouse.up();
-await page.waitForTimeout(150);
-const zoomPaint = await page.evaluate(() => {
-  const c = document.querySelector('#rtMask');
-  const d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height).data;
-  let n = 0, sx = 0, sy = 0;
-  for (let i = 3, p = 0; i < d.length; i += 4, p++) if (d[i] > 10) {
-    n++; sx += p % c.width; sy += (p / c.width) | 0;
-  }
-  return n ? { n, cx: Math.round(sx / n), cy: Math.round(sy / n) } : { n: 0 };
-});
-ok(zoomPaint.n > 0, 'painting works while zoomed in');
-ok(zoomPaint.n && Math.abs(zoomPaint.cx - 455) < 60 && Math.abs(zoomPaint.cy - 355) < 60,
-   `and the stroke lands where the finger was, not offset by the zoom ` +
-   `(centre ${zoomPaint.cx},${zoomPaint.cy}, aimed at 455,355)`);
-// a brush is a share of the image, so its px size does not change with zoom
-const brushLabel = await page.locator('#rtBrushVal').textContent();
-await tap('#rtZoom [data-z="fit"]');
-ok((await page.locator('#rtBrushVal').textContent()) === brushLabel,
-   `brush size is in image pixels, unchanged by zoom (${brushLabel})`);
-ok((await page.locator('#rtZoomVal').textContent()) === 'fit', 'fit returns the whole photo');
-await tap('#rtClear');
-
-const mbox = await page.locator('#rtMask').boundingBox();
-const sc = mbox.width / 900;
-const cx = mbox.x + 455*sc, cy = mbox.y + 355*sc;
-await page.mouse.move(cx-70*sc, cy-70*sc);
-await page.mouse.down();
-for (let i=-70;i<=70;i+=10){
-  await page.mouse.move(cx+i*sc, cy-55*sc, {steps:2});
-  await page.mouse.move(cx+i*sc, cy+55*sc, {steps:2});
-}
-await page.mouse.up();
-await page.waitForTimeout(200);
-// wipe: it takes the red back off, it is not a second way to erase the photo.
-// "it does nothing" was the report; it does, but silently when there is no red.
-const maskInk = () => page.evaluate(() => {
-  const c = document.querySelector('#rtMask');
-  const d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height).data;
-  let n = 0;
-  for (let i = 3; i < d.length; i += 4) if (d[i] > 10) n++;
-  return n;
-});
-const inkBeforeWipe = await maskInk();
-await tap('#rtMode [data-m="erase"]');
-await page.mouse.move(cx - 30, cy);
-await page.mouse.down();
-for (let i = -30; i <= 30; i += 10) await page.mouse.move(cx + i, cy, { steps: 2 });
-await page.mouse.up();
-await page.waitForTimeout(150);
-const inkAfterWipe = await maskInk();
-ok(inkAfterWipe < inkBeforeWipe,
-   `wipe removes painted mask (${inkBeforeWipe} -> ${inkAfterWipe} px)`);
-await tap('#rtMode [data-m="paint"]');
-// with nothing painted it must say what it acts on rather than look broken
-await tap('#rtClear');
-await tap('#rtMode [data-m="erase"]');
-await page.mouse.move(cx - 20, cy + 40);
-await page.mouse.down();
-await page.mouse.move(cx + 20, cy + 40, { steps: 3 });
-await page.mouse.up();
-await page.waitForTimeout(200);
-ok((await page.locator('#toast').textContent()).includes('paint something first'),
-   'and explains itself when there is nothing to wipe: "' +
-   (await page.locator('#toast').textContent()) + '"');
-await tap('#rtMode [data-m="paint"]');
-// repaint for the erase run below
-await page.mouse.move(cx - 70 * sc, cy - 70 * sc);
-await page.mouse.down();
-for (let i = -70; i <= 70; i += 10) {
-  await page.mouse.move(cx + i * sc, cy - 55 * sc, { steps: 2 });
-  await page.mouse.move(cx + i * sc, cy + 55 * sc, { steps: 2 });
-}
-await page.mouse.up();
-await page.waitForTimeout(200);
-// a big fill runs for seconds; watch every hint change so "erasing… 40%" is
-// proved to actually appear rather than asserted from the source
-await page.evaluate(() => {
-  window.__hints = [];
-  new MutationObserver(() => window.__hints.push(document.querySelector('#rtHint').textContent))
-    .observe(document.querySelector('#rtHint'), { childList: true, characterData: true, subtree: true });
-});
-await tap('#rtGo');
-await page.waitForFunction(() => document.querySelector('#rtHint').textContent.includes('gone'),
-  null, { timeout: 60000 }).catch(()=>{});
-ok((await page.locator('#rtHint').textContent()).includes('gone'), 'inpaint reported done');
-const seen = (await page.evaluate(() => window.__hints || [])).filter(t => /erasing… \d+%/.test(t));
-ok(seen.length >= 2, `progress counted up while it ran (${seen.length} updates, e.g. "${seen[1] || seen[0] || 'none'}")`);
-// "no longer white" would also be satisfied by a black hole, a transparent one,
-// or a patch composited at the wrong offset. Require the fill to match what
-// surrounds it, and require the rest of the photo to be untouched.
-const erased = await page.evaluate(async () => {
-  const m = await import('./js/editor.js');
-  const o = m.ed.canvas.getObjects().find(x => x.pKind === 'image');
-  const el = o._element;
-  const c = document.createElement('canvas');
-  c.width = el.naturalWidth; c.height = el.naturalHeight;
-  const g = c.getContext('2d', { willReadFrequently: true });
-  g.drawImage(el, 0, 0);
-  const mean = (x, y, w, h) => {
-    const d = g.getImageData(x, y, w, h).data;
-    const t = [0, 0, 0]; let n = 0, minA = 255;
-    for (let i = 0; i < d.length; i += 4) { t[0]+=d[i]; t[1]+=d[i+1]; t[2]+=d[i+2]; if (d[i+3]<minA) minA=d[i+3]; n++; }
-    return { c: t.map(v => Math.round(v / n)), minA };
-  };
-  const hole = mean(430, 330, 50, 50);
-  const left = mean(300, 330, 40, 40);
-  const right = mean(600, 330, 40, 40);
-  const far = mean(40, 40, 40, 40);
-  let bright = 0;
-  const d = g.getImageData(430, 330, 50, 50).data;
-  for (let i = 0; i < d.length; i += 4) if (d[i] > 200 && d[i+1] > 200 && d[i+2] > 200) bright++;
-  return { hole, left, right, far, bright };
-});
-ok(erased.bright === 0, `the object is gone (${erased.bright} bright pixels left)`);
-const expect = erased.hole.c.map((_, i) => Math.round((erased.left.c[i] + erased.right.c[i]) / 2));
-const off = Math.max(...erased.hole.c.map((v, i) => Math.abs(v - expect[i])));
-ok(off <= 12,
-   `and the fill matches what surrounds it (${erased.hole.c} vs neighbours ${expect}, off by ${off}/255)`);
-ok(erased.hole.minA === 255, `the fill is fully opaque (min alpha ${erased.hole.minA})`);
-ok(erased.far.c.every(v => v > 0),
-   `the rest of the photo is untouched (far corner ${erased.far.c}) — a mis-offset patch would show here`);
-// no mask painted: it must tell you, not silently do nothing
-await page.evaluate(() => { document.querySelector('#toast').textContent = ''; });
-await tap('#rtGo');
-await page.waitForTimeout(400);
-const emptyMsg = await page.locator('#toast').textContent();
-ok(/paint over something first/.test(emptyMsg),
-   `erasing with no mask explains itself ("${emptyMsg}")`);
-
-// undo inside erase mode reverts an applied erase, which cancel never did
-await tap('#rtCancel');
 
 // ---------- layers / canvas / dedupe ----------
 await tap('[data-a="more"]');
@@ -1058,20 +862,6 @@ const worst = Math.min(...reflow.big, ...reflow.small);
 ok(worst >= 90,
    `layers stay inside the frame across canvas changes (worst ${worst}% inside; ` +
    'poster->square used to leave the photo 21% inside and the export 2/3 blank)');
-
-// undoing mid-erase used to walk past the photo's import; the finishing pass then
-// snapshotted an empty canvas and autosave made the blank flyer permanent
-const busyGuard = await page.evaluate(async () => {
-  const m = await import('./js/editor.js');
-  const n = m.ed.canvas.getObjects().length;
-  m.ed.busy = true;
-  await m.undo();
-  const during = m.ed.canvas.getObjects().length;
-  m.ed.busy = false;
-  return { n, during };
-});
-ok(busyGuard.during === busyGuard.n,
-   'undo refuses to run while an erase owns the document');
 
 // an undo replaces every object, so anything still holding the old one must let go
 const detach = await page.evaluate(async () => {

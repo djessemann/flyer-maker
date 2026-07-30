@@ -33,7 +33,7 @@ ok(!sw.includes('cdn.jsdelivr.net'),
 
 // every app module should be in the shell list, or an offline visit misses it
 const shellBlock = sw.slice(sw.indexOf('const SHELL'), sw.indexOf('const RUNTIME_HOSTS'));
-const modules = ['app', 'bus', 'store', 'fonts', 'editor', 'ui', 'retouch', 'inpaint-worker']
+const modules = ['app', 'bus', 'store', 'fonts', 'editor', 'ui', 'crop']
   .map(f => `./js/${f}.js`);
 const missing = modules.filter(m => !shellBlock.includes(m));
 ok(missing.length === 0,

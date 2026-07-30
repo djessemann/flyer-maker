@@ -6,7 +6,6 @@
   "scripts": {
     "test": "node tests/run.mjs",
     "test:mobile": "node tests/mobile.test.mjs",
-    "test:inpaint": "node tests/inpaint.test.mjs",
     "test:fonts": "node tests/fonts.test.mjs",
     "test:offline": "node tests/offline.test.mjs",
     "audit": "node tests/ux-audit.mjs"

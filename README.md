@@ -14,8 +14,11 @@ a flyer editor for the browser. add photos, scrub out what doesn't belong, set t
 select a layer and the bar under the canvas becomes that layer's controls —
 tap `color`, `font`, `size` and you get one sheet doing one job. with nothing
 selected the bar is `text · photo · shape · layers · canvas`. select a photo
-and it leads with **erase object**: paint over what you want gone, tap erase,
-and Telea inpainting fills it back in from the surrounding pixels.
+and you get `crop · adjust · replace · move`: drag a rectangle to keep part of a
+picture, flip and rotate it, swap it out, or place it to the pixel.
+
+there is no object removal. there was, and it is documented in
+[`docs/ui-revision.md`](docs/ui-revision.md) why it was taken out.
 
 ## docs
 
