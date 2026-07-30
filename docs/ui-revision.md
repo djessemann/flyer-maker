@@ -448,3 +448,64 @@ texture right needs a different algorithm class — a PatchMatch-style content-a
 fill that copies real patches from elsewhere in the photo instead of averaging the
 rim. That is a build, not a tweak, and it is not in the app today. The hint says
 "small things on plain backgrounds" because that is exactly where this one works.
+
+# round 7 — object removal is withdrawn
+
+**Doc §7 is no longer implemented, and should not be reimplemented on this
+algorithm.** The owner tried erase on their own photos — motion-blurred, textured
+— and got a smear every time. That is not a defect in the build; it is what this
+algorithm does.
+
+## the measurement
+
+Mean error inside the filled region, against ground truth, on the final build:
+
+| photo | hole | mean error | worst channel |
+|---|---|---|---|
+| plain gradient | r=18 | 0.38/255 | 2 |
+| plain gradient | r=45 | 0.71/255 | 4 |
+| directional texture | r=18 | **22.8**/255 | 71 |
+| directional texture | r=45 | **21.8**/255 | 68 |
+
+Telea fills a hole by propagating colour inward from the rim along the level sets
+of a distance field. Where the surroundings are smooth there is one obviously
+right colour to propagate and the result is invisible. Where they are
+high-frequency there is no such colour, and the fill fans into radial facets. No
+brush size helps — round 4 measured that painting a bigger area makes it *worse*
+(27.0 → 28.5 over 3.9× the area). This is a property of the method, not a bug to
+find.
+
+## why removed rather than scoped down
+
+The hint already said "small things on plain backgrounds", which is accurate and
+still did not save it: the photos a person actually puts on a flyer are textured.
+A button that works only on inputs the owner does not have is worse than no
+button, because it costs a screen, a mode, a two-item segmented control that
+confused its own author ("wipe does nothing" — it worked; it removes your marks,
+not the photo), and a standing promise the tool cannot keep.
+
+## what went
+
+- `js/retouch.js` (418 lines), `js/inpaint-worker.js` (274), `tests/inpaint.test.mjs` (75)
+- the `#retouch` panel, its css, and 28 lines of mobile-suite coverage
+- `ed.busy` and `swapImageSource()`, which existed only to serve an erase pass
+- the photo bar is now `add · crop · adjust · replace · move · more`
+
+Nothing else changed. 130 checks across three suites.
+
+## if it ever comes back
+
+It needs a different algorithm class, not a tuned version of this one:
+**PatchMatch**-style content-aware fill, which copies real patches from elsewhere
+in the image instead of averaging the rim inward. On directional texture that is
+exactly the right shape of solution — the clean material to copy is right there in
+the photo. It is writable in plain JS with no new dependency. Two things to settle
+before building it: it is iterative and a large hole on a 4096px photo is a real
+performance question on a phone, and it fails visibly in its own way (repeated
+patches). Measure it against the table above before shipping it; if it does not
+clearly beat 22.8/255 on texture, leave the feature out.
+
+A cheaper option that cannot smear, because it never invents pixels: a **patch**
+tool, where the person paints the spot and then drags to choose which part of the
+photo to copy from, with a live preview before committing. Manual, but honest, and
+on a repeating texture it lands near-perfect.

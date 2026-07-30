@@ -5,7 +5,7 @@ The browser items below are covered by an automated pass driven through a
 real targets rather than calling functions. Everything marked **hardware** still
 needs a real iPad/iPhone.
 
-## verified — 153 checks across four suites, all passing
+## verified — 130 checks across three suites, all passing
 
 **the interface**
 - [x] sheets receive taps (asserted via `elementFromPoint`, after waiting for the
@@ -30,7 +30,7 @@ needs a real iPad/iPhone.
       button does
 - [x] `move` is an inline nudge pad: 1px per tap, step toggles 1/10/50, four 44px
       targets, and the whole row fits in 393px without clipping `done`
-- [x] `erase` is not the primary-styled button on the photo bar any more
+- [x] `erase` is gone from the photo bar, and the erase screen is gone from the app
 - [x] `edit` enters text editing; the bar becomes an editing state with `done`
 - [x] no horizontal page overflow at 393px
 
@@ -64,24 +64,6 @@ needs a real iPad/iPhone.
 - [x] aspect locks are exact: square is square, "flyer" matches the canvas ratio
 - [x] cancel changes nothing; "crop it" with nothing trimmed says so
 
-**erase object** (paramount)
-- [x] opens from the photo's action bar
-- [x] zoom in/out/fit, and a stroke painted while zoomed lands where the finger
-      was (within 60 native px of the target) — at fit zoom a 4096px photo shows
-      at ~9%, so nothing finer than a ~116px blob could be masked at all
-- [x] brush size is in image pixels, unchanged by zooming
-- [x] progress counts up while a fill runs, observed through the live DOM rather
-      than asserted from the source
-- [x] the instruction is visible on a phone (it used to be hidden under 560px)
-- [x] paint / **wipe** / undo / clear on the mask. wipe takes the red back off —
-      it is not a second way to erase the photo — and says so when nothing is
-      painted, instead of looking like a dead button (it was reported as "does
-      nothing"; measured, it removed 43016 → 25085 mask pixels)
-- [x] Telea inpaint runs in the worker and the target object is **gone from the
-      actual pixels** (asserted: zero bright pixels remain where it was)
-- [x] result swaps into the layer as one undo entry
-- [x] algorithm unit-tested against ground truth: mean error 3.9/255, max 10/255, 31 ms
-
 **everything else**
 - [x] text: add, edit, size (slider + stepper), align, centre on canvas, line
       height, letter spacing, opacity
@@ -99,7 +81,6 @@ needs a real iPad/iPhone.
 - [x] text produces ink in the png; hidden layers are excluded; opacity is honoured
 - [x] 2x and 3x exports have correct **content**, not merely correct size
 - [x] export scale caps correctly on a tabloid; an oversized canvas clamps to 6000px
-- [x] the erase fill matches its surroundings to within 12/255 and is fully opaque
 - [x] saved file carries a real png signature on disk
 - [x] project file saves; the photo picker actually opens
 - [x] autosave → reload → project listed → reopen with every layer intact
@@ -109,7 +90,7 @@ needs a real iPad/iPhone.
 - [x] rename by tap (a finger never fires `dblclick`) and it persists
 - [x] layers stay inside the frame when the canvas size changes
 - [x] handles stay proportional so dragging a small layer moves rather than scales it
-- [x] undo refuses to run mid-erase; an undo dismisses controls bound to old objects
+- [x] an undo dismisses controls bound to old objects
 - [x] a project file imports back intact; a foreign json file is refused
 - [x] no page errors across the whole run
 
@@ -124,10 +105,6 @@ needs a real iPad/iPhone.
 - [ ] press-and-hold on the export preview offers Save Image
 - [ ] add-to-home-screen: icon, standalone chrome, safe-area insets under the action bar
 - [ ] offline relaunch after a first visit, including previously used google fonts
-- [ ] erase brush feel with finger and Apple Pencil; inpaint time on a large photo
-      (region-limited, but a big mask on a 4096px photo is the worst case)
-- [ ] pinch-to-zoom inside erase mode: it is covered by a synthetic two-finger
-      CDP gesture, which says the maths is right but nothing about how it feels
 - [ ] crop handles with a fingertip — 44px hit areas hanging outside the photo
 - [ ] the pan-into-view on sheet open feels helpful rather than jumpy on device
 - [ ] inline sliders are comfortable to drag one-handed at the bottom of the screen
@@ -144,7 +121,6 @@ Three suites, 87 checks:
 
 | suite | what it covers |
 |---|---|
-| `tests/inpaint.test.mjs` | the object-removal maths against ground truth, no browser |
 | `tests/fonts.test.mjs` | load-any-google-font, **including the not-found path** |
 | `tests/offline.test.mjs` | service worker, shell caching, and that the app really boots offline |
 | `tests/mobile.test.mjs` | the whole app on a 393×800 touch viewport |

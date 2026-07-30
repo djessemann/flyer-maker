@@ -36,7 +36,6 @@ const I = {
   canvas: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M2.5 5.5 H17.5 M2.5 10 H17.5 M2.5 14.5 H17.5"/><circle cx="7" cy="5.5" r="1.8" fill="var(--paper)"/><circle cx="13" cy="10" r="1.8" fill="var(--paper)"/><circle cx="8.5" cy="14.5" r="1.8" fill="var(--paper)"/></svg>',
   font: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M2 16 L6.5 4 L11 16 M3.4 12.4 H9.6"/><path d="M17.5 9.6 a3 3 0 0 0-5.6 1.2 M17.5 8.5 V16 M17.5 12.6 a2.6 2.6 0 1 1-5.2 .4 a2.6 2.6 0 0 1 5.2-.4Z"/></svg>',
   size: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M1.5 15.5 L5.5 6 L9.5 15.5 M2.7 12.9 H8.3"/><path d="M12 15.5 L15 8.5 L18 15.5 M12.9 13.6 H17.1"/></svg>',
-  erase: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M9.5 3.5 L16.5 10.5 L11 16 L4 9 Z"/><path d="M6.5 11.5 H16"/><path d="M2.5 17.5 H10"/></svg>',
   crop: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M5.5 1.5 V14.5 H18.5"/><path d="M1.5 5.5 H14.5 V18.5"/></svg>',
   move: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 2.5 V17.5 M2.5 10 H17.5"/><path d="M10 2.5 L7.5 5 M10 2.5 L12.5 5 M10 17.5 L7.5 15 M10 17.5 L12.5 15 M2.5 10 L5 7.5 M2.5 10 L5 12.5 M17.5 10 L15 7.5 M17.5 10 L15 12.5"/></svg>',
   replace: '<svg viewBox="0 0 20 20" width="20" height="20"><path d="M3 7.5 H14 M11 4.5 L14 7.5 L11 10.5"/><path d="M17 12.5 H6 M9 9.5 L6 12.5 L9 15.5"/></svg>',
@@ -277,14 +276,11 @@ export function renderBar() {
       act('move', I.move, 'move') +
       act('more', I.more, 'more');
   } else if (o.pKind === 'image') {
-    // crop before erase: trimming a photo is the everyday job, erasing an object
-    // is the occasional one — and it used to be the loudest button on the bar
     html =
       act('add', I.plus, 'add') +
       act('crop', I.crop, 'crop') +
       act('adjust', I.adjust, 'adjust') +
       act('replace', I.replace, 'replace') +
-      act('erase', I.erase, 'erase') +
       act('move', I.move, 'move') +
       act('more', I.more, 'more');
   } else {
@@ -384,7 +380,6 @@ async function runAction(key, o) {
       break;
 
     case 'move': inlineNudge(o); break;
-    case 'erase': emit('retouch:open', o); break;
     case 'crop': emit('crop:open', o); break;
     case 'replace': pickImage(f => replaceImage(o, f)); break;
     case 'adjust': sheetAdjust(o); break;

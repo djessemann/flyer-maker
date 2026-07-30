@@ -53,43 +53,6 @@
   <div class="actionbar" id="actionbar"></div>
 </div>
 
-<!-- ============ erase (object removal) ============ -->
-<div id="retouch" class="fullmode">
-  <div class="rt-top">
-    <button class="pill ghost" id="rtCancel">cancel</button>
-    <div class="spacer"></div>
-    <!-- zoom lives here: masking a small thing on a big photo needs to get close -->
-    <div class="zoomer" id="rtZoom">
-      <button data-z="out" aria-label="zoom out">–</button>
-      <button data-z="fit" id="rtZoomVal">fit</button>
-      <button data-z="in" aria-label="zoom in">+</button>
-    </div>
-    <div class="spacer"></div>
-    <button class="pill" id="rtGo">erase it</button>
-  </div>
-  <div class="rt-stage" id="rtStage">
-    <div class="rt-wrap" id="rtWrap">
-      <canvas id="rtImg"></canvas>
-      <canvas id="rtMask"></canvas>
-    </div>
-  </div>
-  <div class="rt-bar">
-    <!-- the instruction sits with the controls so it's visible on every size -->
-    <div class="rt-title" id="rtHint">paint over small things on plain backgrounds</div>
-    <div class="rt-brush">
-      <span class="lbl">brush</span>
-      <input type="range" id="rtSize" min="5" max="300" value="120">
-      <span class="lbl" id="rtBrushVal">—</span>
-      <span class="rt-dot" id="rtDot"></span>
-    </div>
-    <div class="rt-tools">
-      <div class="seg" id="rtMode"><button data-m="paint" class="on">paint</button><button data-m="erase">wipe</button></div>
-      <button class="pill ghost" id="rtUndo">undo</button>
-      <button class="pill ghost" id="rtClear">clear</button>
-    </div>
-  </div>
-</div>
-
 <!-- ============ crop mode ============ -->
 <div id="crop" class="fullmode">
   <div class="rt-top">
