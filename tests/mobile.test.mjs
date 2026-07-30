@@ -255,14 +255,9 @@ await page.evaluate(async () => {
 });
 await page.waitForTimeout(300);
 b = await bar();
-ok(JSON.stringify(b) === JSON.stringify(['add','crop','adjust','replace','move','more']), 'photo bar: '+b.join(','));
-// erase is gone: it filled holes by averaging inward from the rim, which is
-// near-exact on a plain background (0.4/255) and a visible smear on texture
-// (22.8/255). A button that only works on photos you don't have is worse than
-// no button. See docs/ui-revision.md round 7.
-ok((await page.locator('#actionbar [data-a="erase"]').count()) === 0,
-   'erase is off the photo bar');
-ok((await page.locator('#retouch').count()) === 0, 'and the erase screen is gone from the app');
+ok(JSON.stringify(b) === JSON.stringify(['add','crop','adjust','replace','erase','move','more']), 'photo bar: '+b.join(','));
+ok(await page.locator('#actionbar [data-a="erase"]').evaluate(e => !e.classList.contains('primary')),
+   'erase is not the primary-styled button on the photo bar');
 await tap('[data-a="adjust"]');
 await tap('#sheetBody [data-f="x"]');
 ok((await active()).flipX === true, 'flip (in adjust)');
@@ -410,6 +405,98 @@ const p2 = await posOf();
 ok(Math.abs((p2.top - p1.top) - 10) < 0.01, `and then moves exactly 10px (${(p2.top - p1.top).toFixed(2)})`);
 await tap('#actionbar [data-done]');
 ok((await bar()).includes('move'), 'done returns the normal bar');
+
+// ---------- erase: does the object actually leave, and what replaces it? ----------
+// The measurement that matters is not "is it different now" — the old fill
+// changed the pixels too and left a person-shaped blur. Assert the object is
+// gone AND that what replaced it has the texture of the photo around it.
+await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const i = m.ed.canvas.getObjects().find(o => o.pKind === 'image');
+  m.ed.canvas.setActiveObject(i); m.ed.canvas.requestRenderAll();
+});
+await page.waitForTimeout(300);
+await tap('[data-a="erase"]');
+ok(await page.locator('#retouch').isVisible(), 'erase mode opens');
+const hintVisible = await page.evaluate(() => {
+  const t = document.querySelector('#rtHint');
+  return { shown: getComputedStyle(t).display !== 'none' && t.getBoundingClientRect().height > 0,
+           text: t.textContent };
+});
+ok(hintVisible.shown, `instruction visible on a phone — "${hintVisible.text}"`);
+ok(await page.locator('#rtZoom').isVisible(), 'erase has a zoom control');
+await tap('#rtZoom [data-z="in"]');
+const zoomed = await page.evaluate(() =>
+  +(document.querySelector('#rtWrap').style.transform.match(/scale\(([\d.]+)\)/) || [, 1])[1]);
+ok(zoomed > 1.2, `zoom really scales the photo (${zoomed.toFixed(2)}x)`);
+await tap('#rtZoom [data-z="fit"]');
+
+// paint over the white square at native 400,300..510,410
+const mbox = await page.locator('#rtMask').boundingBox();
+const sc = mbox.width / 900;
+const cx = mbox.x + 455 * sc, cy = mbox.y + 355 * sc;
+await page.mouse.move(cx - 70 * sc, cy - 70 * sc);
+await page.mouse.down();
+for (let i = -70; i <= 70; i += 10) {
+  await page.mouse.move(cx + i * sc, cy - 60 * sc, { steps: 2 });
+  await page.mouse.move(cx + i * sc, cy + 60 * sc, { steps: 2 });
+}
+await page.mouse.up();
+await page.waitForTimeout(200);
+await page.evaluate(() => {
+  window.__hints = [];
+  new MutationObserver(() => window.__hints.push(document.querySelector('#rtHint').textContent))
+    .observe(document.querySelector('#rtHint'), { childList: true, characterData: true, subtree: true });
+});
+await tap('#rtGo');
+await page.waitForFunction(() => document.querySelector('#rtHint').textContent === 'gone',
+  null, { timeout: 90000 }).catch(() => {});
+ok((await page.locator('#rtHint').textContent()) === 'gone', 'the fill reported done');
+const seen = (await page.evaluate(() => window.__hints || [])).filter(t => /erasing… \d+%/.test(t));
+ok(seen.length >= 2, `progress counted up while it ran (${seen.length} updates)`);
+
+const erased = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const o = m.ed.canvas.getObjects().find(x => x.pKind === 'image');
+  const el = o._element;
+  const c = document.createElement('canvas');
+  c.width = el.naturalWidth; c.height = el.naturalHeight;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(el, 0, 0);
+  const box = g.getImageData(400, 300, 110, 110).data;
+  let bright = 0;
+  for (let i = 0; i < box.length; i += 4) {
+    if (box[i] > 220 && box[i + 1] > 220 && box[i + 2] > 220) bright++;
+  }
+  // texture inside the filled square vs a clean patch of the same photo
+  const energy = d => {
+    let e = 0, n = 0;
+    const w = Math.sqrt(d.length / 4);
+    for (let y = 1; y < w - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      for (let k = 0; k < 3; k++) e += Math.abs(d[i * 4 + k] - d[(i + 1) * 4 + k]);
+      n++;
+    }
+    return n ? e / n : 0;
+  };
+  const clean = g.getImageData(120, 120, 110, 110).data;
+  return { bright, fill: energy(box), around: energy(clean),
+           alpha: Math.min(...[...box.filter((_, i) => i % 4 === 3)]) };
+});
+ok(erased.bright === 0, `the object is gone from the pixels (${erased.bright} bright pixels left)`);
+ok(erased.alpha === 255, 'the fill is fully opaque, not a transparent hole');
+const ratio = erased.around ? erased.fill / erased.around : 0;
+ok(ratio > 0.35,
+   `and what replaced it has the photo's own texture (${ratio.toFixed(2)} of the surrounding detail) — ` +
+   'the old fill left a smooth blur here');
+
+// nothing painted: it must say so rather than silently do nothing
+await page.evaluate(() => { document.querySelector('#toast').textContent = ''; });
+await tap('#rtGo');
+await page.waitForTimeout(400);
+ok(/paint over something first/.test(await page.locator('#toast').textContent()),
+   'erasing with no mask explains itself');
+await tap('#rtCancel');
 
 // ---------- layers / canvas / dedupe ----------
 await tap('[data-a="more"]');

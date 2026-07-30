@@ -509,3 +509,87 @@ A cheaper option that cannot smear, because it never invents pixels: a **patch**
 tool, where the person paints the spot and then drags to choose which part of the
 photo to copy from, with a live preview before committing. Manual, but honest, and
 on a repeating texture it lands near-perfect.
+
+# round 8 — object removal, done properly
+
+Round 7 removed erase because it smeared. The owner then said what they had
+actually wanted all along: *"if I was using a photo as a base and wanted to
+remove a person from it."* That is not what Telea is for. Telea fills a hole by
+propagating colour inward from its rim — right for a scratch, hopeless for a
+person, because there is nothing to propagate except an average.
+
+Erase is back, on **PatchMatch content-aware fill**: for every small square
+overlapping the hole it finds the most similar square in the untouched part of
+the same photo, then rebuilds the hole out of what those squares actually
+contain. Grass stays grass, brick keeps its mortar lines. Barnes et al. 2009 for
+the nearest-neighbour search, Wexler et al. 2007 for the iterate-and-vote
+structure. Still no dependency: ~380 lines in `js/inpaint-worker.js`.
+
+## measured, both algorithms, same images and masks
+
+`error` is distance from the background that was really there. `detail` is how
+much texture the fill has compared with the untouched photo — 1.00 means it is
+as alive as its surroundings, near 0 means a smear.
+
+| background | removing | telea error / detail | patchmatch error / detail |
+|---|---|---|---|
+| plain gradient | small object | 0.5 / 0.12 | **0 / 0.99** |
+| plain gradient | person | 0.5 / 0.16 | **0 / 1.00** |
+| streaks (the failing photo) | small object | 21.5 / 0.06 | **0.7 / 0.98** |
+| streaks | person | 21.9 / 0.05 | **0.8 / 0.98** |
+| brick | person | 4.7 / 0.62 | **6.3 / 0.84** |
+| grass | person | 6.8 / 0.10 | **7.7 / 0.89** |
+
+**Read the grass and brick rows carefully — they are the point of the second
+column.** By error alone the new fill looks *worse* there. It is not: on random
+texture a smooth grey patch scores well on average error while being obviously
+wrong, which is precisely how the old fill kept respectable numbers while
+shipping visible smears. Side by side, Telea leaves a person-shaped blur in the
+grass and the new one leaves grass you cannot find. An error-only metric would
+have rejected the better algorithm. That is the same failure this project keeps
+making in a new costume: measuring the mechanism instead of the outcome.
+
+## three bugs found by measuring rather than assuming
+
+1. **The benchmark itself was wrong first.** It read the mask after transferring
+   its buffer to the worker, so the mask was detached and empty, and it compared
+   the whole image instead of the filled region. Every number came out near zero
+   and both algorithms looked perfect. Fixed before anything else was believed.
+2. **The full-resolution pass averaged ~49 overlapping patches per pixel with
+   equal weight**, which is a blur — the exact thing this algorithm exists to
+   avoid. Now winner-take-all: each pixel takes the single best-matching patch,
+   so full-res grain survives. Detail went 0.02 → 0.9-ish.
+3. **The hole was seeded by diffusing colour inward.** Every patch was then
+   scored against that smooth blob, smooth patches matched it best, and the fill
+   settled back into the smear it started from — non-deterministically, which is
+   why early runs swung between 0.02 and 0.89. It is seeded with real patches
+   copied from the photo now, and the results are stable across runs.
+
+## the app had to change too
+
+The fill's raw material is the surrounding photo, and erase mode was cropping to
+the mask's bounding box plus 15%. Measured on grass with a person: a 15% margin
+gave a fill with **1%** of the surrounding texture; 100% gave **87–95%**. The
+padding is 100% now. It costs almost nothing, because the worker caps its own
+working resolution at 384px and only the final patch-application runs at full
+size.
+
+## timing
+
+~130ms on a test-sized region. Worst realistic case measured — a person-sized
+hole in a 2600×3400 region — is 5.6s, with progress counting up throughout.
+
+## what it still cannot do
+
+It copies from the same photo, so it needs somewhere to copy from. A person in
+front of a plain wall, grass, sky, foliage, gravel: good. A person standing in
+front of a doorway, a line of text, a face, or any structure that continues
+*through* them: it will produce plausible texture in the wrong arrangement,
+because nothing in the photo tells it what was behind. No non-generative method
+fixes that. The honest scope is "remove a thing from a background", not "rebuild
+a scene".
+
+`tests/inpaint.test.mjs` is the guard: four ground-truth cases asserting the
+object is gone, the error is low, **and the detail is above 0.6**. Run against
+the old Telea worker it fails 6 of its 21 checks. Any future change to the fill
+has to clear it.

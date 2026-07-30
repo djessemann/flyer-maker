@@ -1,9 +1,9 @@
 # pasteup
 
-A flyer editor for the browser: upload and crop photos, set type and simple shapes, export PNG. iPad Safari first, phone usable, static hosting.
+A flyer editor for the browser: upload and crop photos, erase unwanted objects, set type and simple shapes, export PNG. iPad Safari first, phone usable, static hosting.
 
 **Spec of record: `docs/design-doc.md`. Read it end to end before writing any code.**
-**Shipped-UI deltas: `docs/ui-revision.md`** — where the build now differs from the doc (contextual action bar instead of the tabbed panel; **object removal removed entirely**) and why. Read it with the doc; it wins on conflicts.
+**Shipped-UI deltas: `docs/ui-revision.md`** — where the build now differs from the doc (contextual action bar instead of the tabbed panel; object removal is content-aware fill, not Telea) and why. Read it with the doc; it wins on conflicts.
 **Visual target: `docs/mock.html`** — the approved look. Open it and match its actual rendering (spacing, weights, states), not a from-memory approximation.
 **Design-system origin: `docs/journal-app-reference.html`** — the app this system extends. When a visual convention is ambiguous, copy that file's patterns (press states, sheets, hairlines).
 
@@ -11,7 +11,7 @@ A flyer editor for the browser: upload and crop photos, set type and simple shap
 
 - Vanilla JS with native ES modules. Zero build step. No frameworks, bundlers, preprocessors, or TypeScript.
 - Deploys as a static GitHub Pages **project site** (served under `/repo-name/`): every path must be relative (`./js/app.js`, never `/js/app.js`).
-- Dependencies, pinned, and only these: `fabric` v6 (ESM) and `idb-keyval` (ESM). Anything else: ask first. Both are **vendored in `vendor/`** rather than loaded from a CDN — offline was broken while they came over the network, and the test shim for them hid a whole class of bug. See `vendor/README.md`. Object removal is gone — it once pulled `opencv.js`, then shipped as hand-written Telea inpainting, and was cut for not working on real photos. Do not reintroduce it without reading `docs/ui-revision.md` round 7.
+- Dependencies, pinned, and only these: `fabric` v6 (ESM) and `idb-keyval` (ESM). Anything else: ask first. Both are **vendored in `vendor/`** rather than loaded from a CDN — offline was broken while they came over the network, and the test shim for them hid a whole class of bug. See `vendor/README.md`. Object removal once pulled `opencv.js`, then shipped as hand-written Telea inpainting and was cut for smearing on real photos; it is now hand-written PatchMatch content-aware fill in `js/inpaint-worker.js`. Still no third dependency. Read `docs/ui-revision.md` rounds 7–8 before touching it.
 - All UI type is DM Mono. Chrome is strictly monochrome per the token table in doc §2 — the flyer being edited is the only color on screen. Selection UI is ink, not blue.
 - Touch targets ≥ 44px. `prefers-reduced-motion` respected.
 
@@ -24,6 +24,8 @@ js/app.js             boot, home screen, top bar, keyboard
 js/ui.js              contextual action bar + every sheet (colour, font, layers, canvas, export)
 js/editor.js          fabric canvas, gestures, undo, autosave, export
 js/crop.js            crop mode
+js/retouch.js         erase-object mode (zoom, pan, progress)
+js/inpaint-worker.js  patchmatch content-aware fill, no dependencies
 js/fonts.js  js/store.js  js/bus.js
 vendor/               fabric + idb-keyval, pinned, served from the repo
 fonts.json            ← already written, see below
@@ -52,7 +54,7 @@ Verify each milestone in a real browser before calling it done. Keep a running `
 
 ## Working style
 
-- Doc §7 (object removal) is **withdrawn**, not unimplemented. See `docs/ui-revision.md` round 7 for the measurements behind that.
+- Doc §7 (object removal) is implemented with a different algorithm than the doc assumes. Any change to it must be measured against `tests/inpaint.test.mjs`, which checks the fill's *texture*, not only its error — an error-only check passes a blur.
 - Build milestone-by-milestone per doc §10. Every milestone ends runnable. Commit at each milestone boundary.
 - Doc §11 lists decisions already made — don't relitigate them. If one proves genuinely unworkable in practice, stop and say so; don't silently substitute.
 - UI copy matches journal-app's register: lowercase, terse ("export png", "save project file", "load any google font by name"). Real labels from the mock, never placeholder text.

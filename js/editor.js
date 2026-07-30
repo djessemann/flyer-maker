@@ -22,6 +22,11 @@ export const ed = {
   docW: 1080, docH: 1350, bgRect: null,
   undoStack: [], redoStack: [], restoring: false,
   exportScale: 2, open: false,
+  // set while a long operation owns the document (an erase pass). undo/redo
+  // refuse to run: rewinding mid-erase used to walk past the photo's import,
+  // then the finishing erase snapshotted the empty canvas and autosave made it
+  // permanent — the flyer came back blank.
+  busy: false,
 };
 
 let dirtyTimer = null, snapTimer = null, host = null;
@@ -283,6 +288,7 @@ export const canUndo = () => ed.undoStack.length > 1;
 export const canRedo = () => ed.redoStack.length > 0;
 
 export async function undo() {
+  if (ed.busy) { emit('toast', 'hang on — finishing that'); return; }
   if (!canUndo()) return;
   clearTimeout(snapTimer);
   ed.redoStack.push(ed.undoStack.pop());
@@ -290,6 +296,7 @@ export async function undo() {
 }
 
 export async function redo() {
+  if (ed.busy) { emit('toast', 'hang on — finishing that'); return; }
   if (!canRedo()) return;
   const s = ed.redoStack.pop();
   ed.undoStack.push(s);
@@ -778,6 +785,15 @@ export async function saveFile(blob, filename) {
 }
 
 const slug = () => ed.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'flyer';
+
+// swap an image's pixels (erase result); keeps transforms, one undo entry
+export async function swapImageSource(obj, dataURL) {
+  await obj.setSrc(dataURL);
+  obj.setCoords();
+  ed.canvas.requestRenderAll();
+  pushSnapshot(); markDirty();
+  emit('layers');
+}
 
 // crop: the new pixels are a sub-rectangle of the old ones, so the layer has to
 // move by that offset at the current scale — otherwise trimming the left edge
