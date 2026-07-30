@@ -398,3 +398,53 @@ updates rather than trusting the source.
 project keeps needing: the crop landmark check (a crop that shifts the photo would
 pass any dimensions-only assertion) and the progress check (read from the DOM, not
 from the fact that a `postMessage` exists in the source).
+
+# round 6 — what a real device showed that 153 checks did not
+
+## the zoom stepper's glyphs were clipped
+
+`–` and `+` were sliced in half by the pill's rounded corner and `fit` hugged its
+left divider. Cause: the global reset sets `button{text-align:left}`, and the two
+controls added in round 5 (`.zoomer`, `.nudge`) centred nothing — every other
+button group in the app flex-centres its label, so this was a gap in the new code
+rather than a change in the old. `.seg` and `.pill` were always fine.
+
+Why nothing caught it: the suite measured button *boxes* — 44px targets, rows
+fitting inside 393px — and never where the label sat inside the box. There is now
+a check that takes a Range rect of each label in `.zoomer`, `.nudge`, `.seg` and
+`.pill` and requires it to be centred within 6px and fully inside the button. It
+was verified against the old CSS first: it fails with "off-centre by 19px;
+off-centre by 24px; off-centre by 15px".
+
+This is the same failure shape as the corner-cropped export and the invisible
+panel: an assertion about the mechanism (a box exists, at the right size) passing
+while the thing a person sees is wrong.
+
+## "unpaint does nothing"
+
+It did work — 43016 → 25085 mask pixels, measured. Two things made it read as
+dead: the name, next to a feature called *erase*, suggested a second way to
+remove things from the photo; and dragging where no red had been painted removed
+nothing, silently. It is `wipe` now, and wiping an empty mask says
+"wipe takes the red back off — paint something first".
+
+## the smudge is real, and it is the algorithm
+
+Measured on this build, mean error inside the filled region against ground truth:
+
+| photo | hole | mean error | worst channel |
+|---|---|---|---|
+| plain gradient | r=18 | **0.38**/255 | 2 |
+| plain gradient | r=45 | **0.71**/255 | 4 |
+| directional texture | r=18 | **22.8**/255 | 71 |
+| directional texture | r=45 | **21.8**/255 | 68 |
+
+Telea propagates colour inward from the rim along the level sets of the distance
+field. On a plain background that is very nearly exact. On high-frequency
+directional texture there is no single correct colour to propagate, so the fill
+becomes a radial smear — and no brush size or repeat pass changes that, which the
+round-4 measurements already showed (27.0 → 28.5 over 3.9× the area). Getting
+texture right needs a different algorithm class — a PatchMatch-style content-aware
+fill that copies real patches from elsewhere in the photo instead of averaging the
+rim. That is a build, not a tweak, and it is not in the app today. The hint says
+"small things on plain backgrounds" because that is exactly where this one works.

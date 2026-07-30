@@ -238,6 +238,20 @@ async function pushToLayer() {
   await swapImageSource(obj, native.toDataURL('image/png'));
 }
 
+// cheap "is anything painted": sample the mask rather than scan every pixel
+function maskHasInk() {
+  if (!maskC) return false;
+  const ctx = maskC.getContext('2d', { willReadFrequently: true });
+  const step = Math.max(1, Math.round(Math.min(maskC.width, maskC.height) / 120));
+  const d = ctx.getImageData(0, 0, maskC.width, maskC.height).data;
+  for (let y = 0; y < maskC.height; y += step) {
+    for (let x = 0; x < maskC.width; x += step) {
+      if (d[(y * maskC.width + x) * 4 + 3] > 10) return true;
+    }
+  }
+  return false;
+}
+
 function clearMask() {
   maskC.getContext('2d').clearRect(0, 0, maskC.width, maskC.height);
   redrawMask();
@@ -280,6 +294,12 @@ function wirePainting() {
   mask.addEventListener('pointerdown', e => {
     if (busy) return;
     e.preventDefault();
+    // wiping where nothing is painted removes nothing, which reads as a dead
+    // button. Say what the mode acts on instead of doing nothing quietly.
+    if (mode === 'erase' && !maskHasInk()) {
+      showToast('wipe takes the red back off — paint something first');
+      return;
+    }
     painting = true;
     snapshot();
     // capture can be refused (a pointer that has already ended, some stylus
