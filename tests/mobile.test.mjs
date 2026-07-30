@@ -425,6 +425,31 @@ const hintVisible = await page.evaluate(() => {
 });
 ok(hintVisible.shown, `FIX: instruction visible on phone — "${hintVisible.text}"`);
 
+// ---------- every control's label is actually inside its control ----------
+// The zoom stepper shipped with its glyphs clipped: buttons inherit
+// text-align:left from the reset, and inside a 999px radius with
+// overflow:hidden the "-" and "+" were sliced off by the rounded corner. Size
+// assertions all passed — nothing measured where the *ink* sat. This does.
+const labelFit = await page.evaluate(() => {
+  const bad = [];
+  for (const b of document.querySelectorAll('.zoomer button, .nudge button, .seg button, .pill')) {
+    const r = b.getBoundingClientRect();
+    if (!r.width || !b.textContent.trim()) continue;
+    const range = document.createRange();
+    range.selectNodeContents(b);
+    const t = range.getBoundingClientRect();
+    if (!t.width) continue;
+    const offCentre = Math.abs((t.left + t.right) / 2 - (r.left + r.right) / 2);
+    const clipped = t.left < r.left - 0.5 || t.right > r.right + 0.5;
+    if (clipped || offCentre > 6) {
+      bad.push(`${b.textContent.trim().slice(0, 8)}: ${clipped ? 'clipped' : 'off-centre by ' + Math.round(offCentre) + 'px'}`);
+    }
+  }
+  return bad;
+});
+ok(labelFit.length === 0, 'FIX: every stepper/segment/pill label sits centred inside its button' +
+   (labelFit.length ? ' — ' + labelFit.join('; ') : ''));
+
 // ---------- erase: get close enough to mask something small ----------
 // at fit zoom a 4096px photo shows at ~9%, so nothing finer than a ~116px blob
 // could be masked at all. Zoom, then check a stroke lands where the finger was.
@@ -480,6 +505,47 @@ await page.mouse.down();
 for (let i=-70;i<=70;i+=10){
   await page.mouse.move(cx+i*sc, cy-55*sc, {steps:2});
   await page.mouse.move(cx+i*sc, cy+55*sc, {steps:2});
+}
+await page.mouse.up();
+await page.waitForTimeout(200);
+// wipe: it takes the red back off, it is not a second way to erase the photo.
+// "it does nothing" was the report; it does, but silently when there is no red.
+const maskInk = () => page.evaluate(() => {
+  const c = document.querySelector('#rtMask');
+  const d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 10) n++;
+  return n;
+});
+const inkBeforeWipe = await maskInk();
+await tap('#rtMode [data-m="erase"]');
+await page.mouse.move(cx - 30, cy);
+await page.mouse.down();
+for (let i = -30; i <= 30; i += 10) await page.mouse.move(cx + i, cy, { steps: 2 });
+await page.mouse.up();
+await page.waitForTimeout(150);
+const inkAfterWipe = await maskInk();
+ok(inkAfterWipe < inkBeforeWipe,
+   `wipe removes painted mask (${inkBeforeWipe} -> ${inkAfterWipe} px)`);
+await tap('#rtMode [data-m="paint"]');
+// with nothing painted it must say what it acts on rather than look broken
+await tap('#rtClear');
+await tap('#rtMode [data-m="erase"]');
+await page.mouse.move(cx - 20, cy + 40);
+await page.mouse.down();
+await page.mouse.move(cx + 20, cy + 40, { steps: 3 });
+await page.mouse.up();
+await page.waitForTimeout(200);
+ok((await page.locator('#toast').textContent()).includes('paint something first'),
+   'and explains itself when there is nothing to wipe: "' +
+   (await page.locator('#toast').textContent()) + '"');
+await tap('#rtMode [data-m="paint"]');
+// repaint for the erase run below
+await page.mouse.move(cx - 70 * sc, cy - 70 * sc);
+await page.mouse.down();
+for (let i = -70; i <= 70; i += 10) {
+  await page.mouse.move(cx + i * sc, cy - 55 * sc, { steps: 2 });
+  await page.mouse.move(cx + i * sc, cy + 55 * sc, { steps: 2 });
 }
 await page.mouse.up();
 await page.waitForTimeout(200);

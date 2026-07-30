@@ -20,6 +20,11 @@ needs a real iPad/iPhone.
 - [x] the bar stays live above an open sheet, so controls swap without closing
 - [x] the canvas returns to its prior position when a sheet closes
 - [x] size and corners are inline sliders: no sheet, no dimming
+- [x] **every stepper / segment / pill label sits centred inside its button.**
+      The zoom stepper shipped with `–` and `+` sliced off by the pill's rounded
+      corner: buttons inherit `text-align:left` from the reset. Every size
+      assertion passed because nothing measured where the *ink* was. Now measured
+      with a Range rect, and verified to fail on the old CSS (19/24/15px off)
 - [x] copy carries no explanation a control doesn't need: the crop readout is
       `1840 × 1035 px` and nothing else, and no sheet explains what its own
       button does
@@ -68,7 +73,10 @@ needs a real iPad/iPhone.
 - [x] progress counts up while a fill runs, observed through the live DOM rather
       than asserted from the source
 - [x] the instruction is visible on a phone (it used to be hidden under 560px)
-- [x] paint / unpaint / undo / clear on the mask
+- [x] paint / **wipe** / undo / clear on the mask. wipe takes the red back off —
+      it is not a second way to erase the photo — and says so when nothing is
+      painted, instead of looking like a dead button (it was reported as "does
+      nothing"; measured, it removed 43016 → 25085 mask pixels)
 - [x] Telea inpaint runs in the worker and the target object is **gone from the
       actual pixels** (asserted: zero bright pixels remain where it was)
 - [x] result swaps into the layer as one undo entry
