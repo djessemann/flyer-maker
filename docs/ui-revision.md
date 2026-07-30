@@ -593,3 +593,62 @@ a scene".
 object is gone, the error is low, **and the detail is above 0.6**. Run against
 the old Telea worker it fails 6 of its 21 checks. Any future change to the fill
 has to clear it.
+
+# round 9 — erase is an eraser
+
+Two attempts at filling the hole back in are now both gone. The owner, after
+trying the second one on their own photographs: *"just remove the smudge
+features entirely. i'd like to be able to erase parts of an image with an eraser
+tool. otherwise anything more complex seems just broken."*
+
+That is the right call, and the history says why.
+
+## what was tried
+
+| round | approach | measured result | why it went |
+|---|---|---|---|
+| M5 | `opencv.js` inpainting | never shipped working | 11MB dependency, failed to load offline |
+| 2–8 | Telea fast-marching, hand-written | 0.4/255 on plain, **22.8/255 on texture** | smeared on every real photo |
+| 8 | PatchMatch content-aware fill, hand-written | 0.8/255 and 0.98 detail on the same texture | won every benchmark, still looked wrong on the owner's actual photographs |
+
+The PatchMatch version was not a failure of measurement — the numbers were real,
+the ground-truth harness was sound, and the synthetic cases were convincing side
+by side. It was a failure of the *premise*: a fill has to invent what was behind
+the thing you removed, and on a real photograph there is usually no honest answer
+sitting elsewhere in the frame. Two rounds of good engineering pointed at a
+problem that a flyer tool does not need to solve.
+
+## what erase is now
+
+`js/retouch.js`, ~250 lines, no worker, no engine, no dependency. You rub, the
+pixels go, whatever is behind shows through. It happens under your finger as you
+drag — there is nothing to run and nothing to wait for, so there is nothing that
+can be wrong about it.
+
+- soft-edged brush, sized as a share of the photo rather than in screen pixels
+- a chequerboard behind the photo, because "erased" has to read as *gone* and not
+  as whatever colour the stage happens to be
+- undo per stroke, clear back to the original, cancel discards, done applies
+- zoom, pinch and pan kept from the previous version
+- the layer is saved as png: the transparency is the whole point and a jpeg has
+  none
+
+For a flyer this is the more useful tool anyway. Knocking a subject out of its
+background so the flyer's own colour shows through is a design move; a seamless
+patch of invented grass is not.
+
+## what went
+
+`js/inpaint-worker.js` (~500 lines), `tests/inpaint.test.mjs`, the mask overlay,
+the paint/wipe pair, the progress reporting, the `ed.busy` guard that existed so
+undo could not run during a long fill, and the service-worker entry for the
+worker. About 800 lines net.
+
+## the test that matters now
+
+The old suites asked "did the pixels change" and "is the fill close to the truth".
+The eraser's test asks the only two questions a person has: are the pixels I
+rubbed actually gone, and does my flyer show through the hole? Both are read
+from the exported png, not from the alpha channel of an internal canvas.
+
+140 checks across three suites.

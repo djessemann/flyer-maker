@@ -15,9 +15,12 @@ select a layer and the bar under the canvas becomes that layer's controls —
 tap `color`, `font`, `size` and you get one sheet doing one job. with nothing
 selected the bar is `text · photo · shape · layers · canvas`. select a photo
 and you get `crop · adjust · replace · erase · move`: drag a rectangle to keep
-part of a picture, flip and rotate it, swap it out, place it to the pixel — or
-paint over something you want gone and have the photo's own background copied
-into its place.
+part of a picture, flip and rotate it, swap it out, place it to the pixel, or
+rub bits of it away with an eraser so whatever is behind shows through.
+
+erase is an eraser and nothing more — it removes pixels, it does not try to
+guess what was behind them. two versions that did try are documented in
+[`docs/ui-revision.md`](docs/ui-revision.md), along with why they were cut.
 
 ## docs
 

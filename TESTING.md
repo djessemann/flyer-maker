@@ -5,7 +5,7 @@ The browser items below are covered by an automated pass driven through a
 real targets rather than calling functions. Everything marked **hardware** still
 needs a real iPad/iPhone.
 
-## verified — 160 checks across four suites, all passing
+## verified — 140 checks across three suites, all passing
 
 **the interface**
 - [x] sheets receive taps (asserted via `elementFromPoint`, after waiting for the
@@ -63,20 +63,17 @@ needs a real iPad/iPhone.
 - [x] aspect locks are exact: square is square, "flyer" matches the canvas ratio
 - [x] cancel changes nothing; "crop it" with nothing trimmed says so
 
-**erase object** (paramount)
+**erase** (paramount)
 - [x] opens from the photo's action bar; zoom in/out/fit and pinch; brush size in
-      image pixels; undo per stroke; clear
-- [x] **the object leaves the actual pixels** (zero bright pixels remain where it was)
-- [x] **and what replaces it has the photo's own texture** — measured as gradient
-      energy inside the fill against the untouched photo, 1.00 in the app test.
-      This is the assertion that matters: the old fill also changed the pixels,
-      and left a person-shaped blur that an error-only check happily passed
-- [x] ground truth, four cases (plain / streaky background × small object /
-      person): error ≤0.8/255 and texture ≥0.98, in ~130ms each
-- [x] the same suite run against the old Telea fill fails 6 of its 21 checks
-- [x] the fill is fully opaque, never a transparent hole
-- [x] progress counts up while it runs; erasing with nothing painted says so
-- [x] worst realistic timing: 5.6s for a person-sized region on a 2600×3400 photo
+      image pixels; undo per stroke; clear; cancel discards, done applies
+- [x] **the pixels go while you drag** — nothing to run, nothing to wait for
+- [x] the rubbed area is fully transparent in the layer (2500/2500 pixels)
+- [x] and the rest of the photo is untouched
+- [x] the layer is kept as png, because a jpeg has no transparency to keep
+- [x] **the flyer background shows through the hole in the exported png** — the
+      whole point, checked by reading the pixel rather than trusting the alpha
+- [x] the photo sits on a chequerboard in erase mode, so "gone" is legible
+      rather than looking like whatever colour is behind the stage
 
 **everything else**
 - [x] text: add, edit, size (slider + stepper), align, centre on canvas, line
@@ -119,9 +116,8 @@ needs a real iPad/iPhone.
 - [ ] press-and-hold on the export preview offers Save Image
 - [ ] add-to-home-screen: icon, standalone chrome, safe-area insets under the action bar
 - [ ] offline relaunch after a first visit, including previously used google fonts
-- [ ] erase on real photographs, not synthetic backgrounds — the algorithm is
-      measured against generated grass/brick/streaks, which is not the same as a
-      pavement, a crowd, or a face behind the thing being removed
+- [ ] eraser feel with a fingertip and an Apple Pencil, and whether the soft
+      edge is soft enough at flyer sizes
 - [ ] crop handles with a fingertip — 44px hit areas hanging outside the photo
 - [ ] the pan-into-view on sheet open feels helpful rather than jumpy on device
 - [ ] inline sliders are comfortable to drag one-handed at the bottom of the screen
@@ -138,7 +134,6 @@ Three suites, 87 checks:
 
 | suite | what it covers |
 |---|---|
-| `tests/inpaint.test.mjs` | object removal against ground truth: is it gone, and does the fill have real texture |
 | `tests/fonts.test.mjs` | load-any-google-font, **including the not-found path** |
 | `tests/offline.test.mjs` | service worker, shell caching, and that the app really boots offline |
 | `tests/mobile.test.mjs` | the whole app on a 393×800 touch viewport |
