@@ -9,6 +9,7 @@ import {
 } from './editor.js';
 import { initUI, closeSheet, showToast, sheetExport } from './ui.js';
 import { initRetouch } from './retouch.js';
+import { initCrop } from './crop.js';
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c =>
@@ -21,6 +22,7 @@ async function boot() {
   initEditor();
   initUI();
   initRetouch();
+  initCrop();
   wireHome();
   wireTopbar();
   wireKeyboard();
@@ -200,8 +202,9 @@ function wireTopbar() {
 function wireKeyboard() {
   addEventListener('keydown', e => {
     if (!ed.open) return;
-    // erase mode owns the screen and has its own controls
+    // the full-screen modes own the screen and have their own controls
     if (document.querySelector('#retouch').classList.contains('on')) return;
+    if (document.querySelector('#crop').classList.contains('on')) return;
     // only text entry should swallow shortcuts — a focused slider used to kill
     // undo entirely, which is exactly when you want it
     const t = e.target;

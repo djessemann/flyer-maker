@@ -81,8 +81,13 @@ ok((await active()).kind === 'image', 'photo added and selected');
 let b = await bar();
 ok(b[0] === 'add', 'FIX: "add" is the first item even with a photo selected: ' + b.join(','));
 await tap('[data-a="add"]');
-ok((await page.locator('#sheetBody [data-x="text"]').count()) === 1, 'add sheet offers text/photo/shape');
-await tap('#sheetBody [data-x="text"]');
+// "add" used to open a sheet over the flyer listing the same three verbs the
+// empty bar shows directly. It now expands in the bar itself, nothing covered.
+ok((await page.locator('#actionbar [data-x="text"]').count()) === 1,
+   'FIX: "add" expands in the bar, no sheet: text/photo/shape are in #actionbar');
+ok(!(await page.locator('#sheet').evaluate(e => e.classList.contains('on'))),
+   'FIX: and no sheet is opened over the flyer to reach them');
+await tap('#actionbar [data-x="text"]');
 await page.waitForTimeout(400);
 ok((await kinds()).includes('text'), 'text added without ever deselecting the photo');
 await page.keyboard.type('BLOCK PARTY');
@@ -91,7 +96,7 @@ await page.waitForTimeout(300);
 
 // ---------- FIX 2: the bar fits ----------
 b = await bar();
-ok(JSON.stringify(b) === JSON.stringify(['add','edit','font','color','size','more']),
+ok(JSON.stringify(b) === JSON.stringify(['add','edit','font','color','size','move','more']),
    'text bar: ' + b.join(','));
 const fit = await page.evaluate(() => {
   const bar = document.querySelector('#actionbar');
@@ -215,11 +220,11 @@ await tap('#sheetClose');
 
 // ---------- shapes ----------
 await tap('[data-a="add"]');
-await tap('#sheetBody [data-x="shape"]');
+await tap('#actionbar [data-x="shape"]');
 await tap('#sheetBody [data-k="rounded"]');
-ok((await active()).kind === 'rounded', 'shape added via add sheet');
+ok((await active()).kind === 'rounded', 'shape added from the bar');
 b = await bar();
-ok(JSON.stringify(b) === JSON.stringify(['add','fill','stroke','corners','more']), 'shape bar: '+b.join(','));
+ok(JSON.stringify(b) === JSON.stringify(['add','fill','stroke','corners','move','more']), 'shape bar: '+b.join(','));
 await tap('[data-a="stroke"]');
 await tap('#sheetBody .sw[data-c="#ffffff"]');
 ok((await active()).stroke === '#ffffff', 'stroke colour: ' + (await active()).stroke);
@@ -242,7 +247,11 @@ await page.evaluate(async () => {
 });
 await page.waitForTimeout(300);
 b = await bar();
-ok(JSON.stringify(b) === JSON.stringify(['add','erase','replace','adjust','more']), 'photo bar: '+b.join(','));
+ok(JSON.stringify(b) === JSON.stringify(['add','crop','adjust','replace','erase','move','more']), 'photo bar: '+b.join(','));
+// erase was the one filled, dominant button on the photo bar: the most
+// destructive action shouting loudest on a layout tool
+ok(await page.locator('#actionbar [data-a="erase"]').evaluate(e => !e.classList.contains('primary')),
+   'FIX: erase is no longer the primary-styled button on the photo bar');
 await tap('[data-a="adjust"]');
 await tap('#sheetBody [data-f="x"]');
 ok((await active()).flipX === true, 'flip (in adjust)');
@@ -258,6 +267,145 @@ ok(fitted.d < 1e-6 && fitted.angle === 0 && fitted.dx < 1,
    `fit really fits and centres (scale off ${fitted.d.toExponential(1)}, dx ${fitted.dx.toFixed(1)})`);
 await tap('#sheetClose');
 
+// ---------- crop: does the kept region stay where it was? ----------
+// The whole risk in cropping is the offset: trim the left edge and the photo
+// slides left, so everything you lined it up with is wrong. Track one landmark
+// pixel of the photo and require it not to move on the flyer at all.
+const landmarkAt = (px, py) => page.evaluate(async ([px, py]) => {
+  const m = await import('./js/editor.js');
+  const o = m.ed.canvas.getObjects().find(x => x.pKind === 'image');
+  return { x: +(o.left + px * o.scaleX).toFixed(2), y: +(o.top + py * o.scaleY).toFixed(2),
+           left: +o.left.toFixed(2), top: +o.top.toFixed(2), sx: o.scaleX,
+           nat: [o._element.naturalWidth, o._element.naturalHeight] };
+}, [px, py]);
+const dragBy = async (sel, dx, dy) => {
+  const bx = await page.locator(sel).boundingBox();
+  const cx = bx.x + bx.width / 2, cy = bx.y + bx.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  for (let i = 1; i <= 6; i++) await page.mouse.move(cx + dx * i / 6, cy + dy * i / 6);
+  await page.mouse.up();
+  await page.waitForTimeout(120);
+};
+const preCrop = await landmarkAt(400, 300);
+await tap('[data-a="crop"]');
+ok(await page.locator('#crop').isVisible(), 'crop mode opens');
+ok(/keeping \d+ × \d+ px/.test(await page.locator('#cpHint').textContent()),
+   'crop says how many pixels you are keeping: ' + (await page.locator('#cpHint').textContent()));
+await dragBy('.cp-h[data-h="nw"]', 55, 40);
+await dragBy('.cp-h[data-h="se"]', -30, -25);
+const cropped = await page.locator('#cpHint').textContent();
+await tap('#cpGo');
+await page.waitForTimeout(700);
+const post = await landmarkAt(0, 0);
+ok(post.nat[0] < preCrop.nat[0] && post.nat[1] < preCrop.nat[1],
+   `the photo's pixels really were trimmed (${preCrop.nat.join('x')} -> ${post.nat.join('x')})`);
+const trimX = Math.round((post.left - preCrop.left) / post.sx);
+const trimY = Math.round((post.top - preCrop.top) / post.sx);
+ok(trimX > 0 && trimY > 0, `crop came off the top-left, not the origin (${trimX},${trimY})`);
+const moved = await landmarkAt(400 - trimX, 300 - trimY);
+ok(Math.abs(moved.x - preCrop.x) < 2 && Math.abs(moved.y - preCrop.y) < 2,
+   `the kept picture did not shift on the flyer (landmark ${preCrop.x},${preCrop.y} -> ${moved.x},${moved.y})`);
+// and it survives a round trip through the export, at full resolution
+const cropPx = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const blob = await m.renderPNGBlob(1);
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(bmp, 0, 0);
+  const o = m.ed.canvas.getObjects().find(x => x.pKind === 'image');
+  const r = o.getBoundingRect();
+  // the test photo is a green gradient; the headline can sit over the middle, so
+  // sample a grid and count how much of the box is the photo's own colour
+  let green = 0, total = 0;
+  const seenAt = [];
+  for (const fx of [0.15, 0.5, 0.85]) for (const fy of [0.15, 0.5, 0.85]) {
+    const d = g.getImageData((r.left + r.width * fx) | 0, (r.top + r.height * fy) | 0, 1, 1).data;
+    total++;
+    if (d[1] > d[0] + 8 && d[1] > d[2] + 3) green++;
+    seenAt.push([d[0], d[1], d[2]].join(','));
+  }
+  return { green, total, seenAt, w: Math.round(r.width) };
+});
+ok(cropPx.green >= 6,
+   `the cropped photo fills its box in the export — ${cropPx.green}/${cropPx.total} sampled points ` +
+   `are the photo's own colour (${cropPx.seenAt[0]})`);
+// undo puts the whole photo back — crop must not be a one-way door
+await tap('#btnUndo');
+await page.waitForTimeout(700);
+const undone = await landmarkAt(0, 0);
+ok(undone.nat[0] === preCrop.nat[0] && undone.nat[1] === preCrop.nat[1],
+   `undo restores the uncropped photo (${undone.nat.join('x')})`);
+await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const i = m.ed.canvas.getObjects().find(o => o.pKind === 'image');
+  m.ed.canvas.setActiveObject(i); m.ed.canvas.requestRenderAll();
+});
+await page.waitForTimeout(300);
+// aspect locks are exact, not approximate
+await tap('[data-a="crop"]');
+await tap('#cpAspect [data-r="1"]');
+const sq = await page.locator('#cpRect').boundingBox();
+ok(Math.abs(sq.width - sq.height) <= 1, `square lock is square (${Math.round(sq.width)}x${Math.round(sq.height)})`);
+await tap('#cpAspect [data-r="flyer"]');
+const fl = await page.locator('#cpRect').boundingBox();
+const wantR = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  return m.ed.docW / m.ed.docH;
+});
+ok(Math.abs(fl.width / fl.height - wantR) < 0.02,
+   `"flyer" lock matches the canvas shape (${(fl.width / fl.height).toFixed(3)} vs ${wantR.toFixed(3)})`);
+await tap('#cpCancel');
+ok(!(await page.locator('#crop').isVisible()), 'cancel leaves crop without changing the photo');
+
+// ---------- move: placing a small layer without a keyboard ----------
+// a finger drag on a small layer grabs its own handles, and a phone has no
+// arrow keys — this was the one gap a reviewer had to invent a workaround for
+await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const t = m.ed.canvas.getObjects().find(o => o.pKind === 'text');
+  m.ed.canvas.setActiveObject(t); m.ed.canvas.requestRenderAll();
+});
+await page.waitForTimeout(300);
+const posOf = () => page.evaluate(async () => {
+  const o = (await import('./js/editor.js')).ed.canvas.getActiveObject();
+  return { left: o.left, top: o.top };
+});
+await tap('[data-a="move"]');
+ok((await page.locator('#actionbar .nudge button').count()) === 4, 'move offers four directions in the bar');
+const nudgeTargets = await page.$$eval('#actionbar .nudge button', els =>
+  els.map(e => { const r = e.getBoundingClientRect(); return Math.min(r.width, r.height); }));
+ok(nudgeTargets.every(v => v >= 44), 'each nudge target is at least 44px: ' + nudgeTargets.join(','));
+// five controls plus a 176px pad in 393px: "done" was clipped off the edge
+const moveFit = await page.evaluate(() => {
+  const bar = document.querySelector('#actionbar');
+  const r = bar.getBoundingClientRect();
+  const over = [...bar.querySelectorAll('.inline > *')]
+    .filter(e => e.getBoundingClientRect().right > r.right + 1).length;
+  return { over, scrollW: bar.scrollWidth, clientW: bar.clientWidth };
+});
+ok(moveFit.over === 0 && moveFit.scrollW <= moveFit.clientW,
+   `the whole move row fits in the bar (${moveFit.scrollW}px in ${moveFit.clientW}px)`);
+const p0 = await posOf();
+await tap('#actionbar [data-n="right"]');
+const p1 = await posOf();
+ok(Math.abs((p1.left - p0.left) - 1) < 0.01, `one tap moves exactly 1px (${(p1.left - p0.left).toFixed(2)})`);
+await tap('#actionbar [data-step]');
+ok((await page.locator('#actionbar [data-step]').textContent()) === '10px', 'step toggles to 10px');
+await tap('#actionbar [data-n="down"]');
+const p2 = await posOf();
+ok(Math.abs((p2.top - p1.top) - 10) < 0.01, `and then moves exactly 10px (${(p2.top - p1.top).toFixed(2)})`);
+await tap('#actionbar [data-done]');
+ok((await bar()).includes('move'), 'done returns the normal bar');
+// hand the selection back to the photo for the erase block below
+await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const i = m.ed.canvas.getObjects().find(o => o.pKind === 'image');
+  m.ed.canvas.setActiveObject(i); m.ed.canvas.requestRenderAll();
+});
+await page.waitForTimeout(300);
+
 // ---------- FIX 6: erase instructions visible on a phone ----------
 await tap('[data-a="erase"]');
 ok(await page.locator('#retouch').isVisible(), 'erase mode opens');
@@ -267,6 +415,53 @@ const hintVisible = await page.evaluate(() => {
   return { shown: getComputedStyle(t).display !== 'none' && r.height > 0, text: t.textContent };
 });
 ok(hintVisible.shown, `FIX: instruction visible on phone — "${hintVisible.text}"`);
+
+// ---------- erase: get close enough to mask something small ----------
+// at fit zoom a 4096px photo shows at ~9%, so nothing finer than a ~116px blob
+// could be masked at all. Zoom, then check a stroke lands where the finger was.
+ok((await page.locator('#rtZoom').isVisible()), 'erase has a zoom control');
+await tap('#rtZoom [data-z="in"]');
+await tap('#rtZoom [data-z="in"]');
+const zoomState = await page.evaluate(() => ({
+  label: document.querySelector('#rtZoomVal').textContent,
+  scale: +(document.querySelector('#rtWrap').style.transform.match(/scale\(([\d.]+)\)/) || [, 1])[1],
+}));
+ok(zoomState.scale > 1.5, `zoom really scales the photo (${zoomState.scale.toFixed(2)}x)`);
+ok(/%/.test(zoomState.label), 'and reads out the magnification: ' + zoomState.label);
+// paint a short stroke over the white square (native 400,300 .. 510,410)
+const zt = await page.evaluate(() => {
+  const m = document.querySelector('#rtMask');
+  const r = m.getBoundingClientRect();
+  const k = r.width / m.width;
+  return { x: r.left + 455 * k, y: r.top + 355 * k, k };
+});
+ok(zt.x > 0 && zt.x < 393 && zt.y > 0 && zt.y < 800,
+   'the zoomed-to spot is still on screen, so it can be painted');
+await page.mouse.move(zt.x - 10, zt.y - 10);
+await page.mouse.down();
+for (let i = -10; i <= 10; i += 5) await page.mouse.move(zt.x + i, zt.y + i, { steps: 2 });
+await page.mouse.up();
+await page.waitForTimeout(150);
+const zoomPaint = await page.evaluate(() => {
+  const c = document.querySelector('#rtMask');
+  const d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height).data;
+  let n = 0, sx = 0, sy = 0;
+  for (let i = 3, p = 0; i < d.length; i += 4, p++) if (d[i] > 10) {
+    n++; sx += p % c.width; sy += (p / c.width) | 0;
+  }
+  return n ? { n, cx: Math.round(sx / n), cy: Math.round(sy / n) } : { n: 0 };
+});
+ok(zoomPaint.n > 0, 'painting works while zoomed in');
+ok(zoomPaint.n && Math.abs(zoomPaint.cx - 455) < 60 && Math.abs(zoomPaint.cy - 355) < 60,
+   `and the stroke lands where the finger was, not offset by the zoom ` +
+   `(centre ${zoomPaint.cx},${zoomPaint.cy}, aimed at 455,355)`);
+// a brush is a share of the image, so its px size does not change with zoom
+const brushLabel = await page.locator('#rtBrushVal').textContent();
+await tap('#rtZoom [data-z="fit"]');
+ok((await page.locator('#rtBrushVal').textContent()) === brushLabel,
+   `brush size is in image pixels, unchanged by zoom (${brushLabel})`);
+ok((await page.locator('#rtZoomVal').textContent()) === 'fit', 'fit returns the whole photo');
+await tap('#rtClear');
 
 const mbox = await page.locator('#rtMask').boundingBox();
 const sc = mbox.width / 900;
@@ -279,10 +474,19 @@ for (let i=-70;i<=70;i+=10){
 }
 await page.mouse.up();
 await page.waitForTimeout(200);
+// a big fill runs for seconds; watch every hint change so "erasing… 40%" is
+// proved to actually appear rather than asserted from the source
+await page.evaluate(() => {
+  window.__hints = [];
+  new MutationObserver(() => window.__hints.push(document.querySelector('#rtHint').textContent))
+    .observe(document.querySelector('#rtHint'), { childList: true, characterData: true, subtree: true });
+});
 await tap('#rtGo');
 await page.waitForFunction(() => document.querySelector('#rtHint').textContent.includes('gone'),
   null, { timeout: 60000 }).catch(()=>{});
 ok((await page.locator('#rtHint').textContent()).includes('gone'), 'inpaint reported done');
+const seen = (await page.evaluate(() => window.__hints || [])).filter(t => /erasing… \d+%/.test(t));
+ok(seen.length >= 2, `progress counted up while it ran (${seen.length} updates, e.g. "${seen[1] || seen[0] || 'none'}")`);
 // "no longer white" would also be satisfied by a black hole, a transparent one,
 // or a patch composited at the wrong offset. Require the fill to match what
 // surrounds it, and require the rest of the photo to be untouched.

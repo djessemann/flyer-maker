@@ -225,8 +225,8 @@ Three assertions were literally `ok(true, …)`. One used `waitForFunction` with
 async predicate, which resolves on the returned Promise rather than its value — it
 had been green and meaningless since the day it was written.
 
-The suite is now 123 checks across four files, and every one of those six injected
-bugs fails at least one of them.
+The suite is now 153 checks across four files (123 at the end of round 4), and
+every one of those six injected bugs fails at least one of them.
 
 ## data loss
 
@@ -317,3 +317,84 @@ it exercised a slightly different build than users got.
   copied into all 40 entries. Sources are stored once and referenced by token.
 - The export filename now matches doc §8 (`name-WxH@Nx.png`) instead of folding
   the scale into the dimensions.
+
+# round 5 — the feature gaps behind the friction
+
+Round 4 fixed what the reviewers could reproduce as *broken*. It left four things
+they had reported as *friction* — places where the app had no answer, not places
+where its answer was wrong. The QA charter is partly to blame: it says
+"suggestions with no observed problem behind them do not count", which stopped
+padded reports and also stopped anyone proposing a feature. Everything below came
+in disguised as a workaround someone had to invent.
+
+## crop (new)
+
+There was no way to trim a photo. `crop` sits second on the photo bar and opens a
+full-screen mode alongside erase: drag the corners, drag the whole rectangle, or
+draw a fresh one by pressing on the dimmed area. Thirds guides, a live
+`keeping 1840 × 1035 px` readout, and locks for free / flyer / square / 4:5 —
+"flyer" meaning the shape of the canvas you are actually designing.
+
+**The whole risk in cropping is the offset.** Replacing an image's pixels with a
+sub-rectangle moves every remaining pixel unless the layer moves with it: trim
+120px off the left and the photo slides 120px left, so everything you had lined it
+up against is now wrong. `cropImageSource()` shifts the layer by the crop origin
+scaled by the layer's own scale, rotated by its angle. The test asserts the thing
+a person would notice — a landmark pixel of the photo stays at the same flyer
+coordinate, to within 2px, after a crop taken out of the middle of the image.
+
+Two details worth keeping: the fitted display size is rounded to whole screen
+pixels, so scaling the rectangle back naively shaved a pixel or two off each edge
+and a keep-everything crop quietly lost its border — the edges snap instead. And a
+jpeg photo is re-encoded as jpeg: one pass is invisible, while a PNG of a 4096px
+photo is many megabytes in every autosave. Undo restores the uncropped pixels,
+because sources are held in the token store.
+
+## move — placing something without a keyboard
+
+Round 4 fixed handles swallowing a small layer, which stopped the drag *destroying*
+it. It did not give anyone a way to place a layer precisely on a phone: arrow-key
+nudge needs a keyboard, and `more` offered only centre-across / centre-down. A
+reviewer's own words: *"I guessed at 'zoom to 100% first, position while it is
+still big, shrink afterwards', which worked, but it is a workaround I invented,
+not something the app suggests."*
+
+`move` is now on every layer's bar and takes over the bar rather than opening a
+sheet — four 44px arrows, a step toggle cycling 1 / 10 / 50px, and press-and-hold
+to repeat. The row is 393px wide in a 393px bar; the first version clipped `done`
+off the right edge, which is now asserted rather than eyeballed. Centre-across and
+centre-down also moved out of the text-only block in `more`, where they had been
+unreachable for photos and shapes.
+
+## zoom inside erase
+
+Erase fitted the photo to the screen and stopped there, so on a 4096px photo the
+finest thing you could mask was about 116px across — the brush fix in round 4 made
+the brush proportional but could not make the *photo* bigger. There is now a
+zoom stepper in the erase toolbar (out / fit / in, reading out the true
+magnification) plus two-finger pinch and pan, with a second finger abandoning any
+half-drawn stroke rather than smearing it. Stroke coordinates are read off the
+element's live rect, so they survive the CSS scale; the test paints while zoomed
+and requires the mask to land within 60 native pixels of where the finger was.
+
+A long fill also used to sit on the word "erasing…" for seconds. The worker now
+reports progress as it marches, and the test watches the live DOM for those
+updates rather than trusting the source.
+
+## the bar
+
+- `add` opened a sheet over the flyer listing the same three verbs the empty bar
+  shows directly. It expands in the bar itself now. Still two taps — but no sheet,
+  no dimming, and the second tap is where your thumb already is.
+- `erase` was the one filled, dominant button on the photo bar: the most
+  destructive action shouting loudest in a layout tool. It is now plain, and sits
+  after `crop`, `adjust` and `replace`.
+- `.act` min-width dropped 60px → 54px so a seven-item bar still fits 393px
+  without scrolling; 600px and up gets the roomier target back.
+
+## count
+
+153 checks across four suites, up from 123. Two of the new ones are the kind this
+project keeps needing: the crop landmark check (a crop that shifts the photo would
+pass any dimensions-only assertion) and the progress check (read from the DOM, not
+from the fact that a `postMessage` exists in the source).

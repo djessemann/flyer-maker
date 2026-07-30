@@ -117,7 +117,7 @@ function estimate(i, j, w, h, flags, T, px, eps) {
   }
 }
 
-function inpaint(px, w, h, maskBits, radius) {
+function inpaint(px, w, h, maskBits, radius, report = () => {}) {
   const N = w * h;
   const flags = new Uint8Array(N);
   const T = new Float32Array(N);
@@ -152,7 +152,11 @@ function inpaint(px, w, h, maskBits, radius) {
   const affordable = Math.sqrt(WORK_BUDGET / (4 * unknown));
   const eps = Math.max(4, Math.min(14, Math.round(Math.min(wanted, affordable))));
 
-  // march inward; every popped pixel fills its still-unknown neighbours
+  // march inward; every popped pixel fills its still-unknown neighbours.
+  // a big fill takes seconds, so report as it goes rather than sit silent
+  let done = 0;
+  const step = Math.max(1, Math.floor(unknown / 20));
+  let nextReport = step;
   while (heap.size) {
     const idx = heap.pop();
     flags[idx] = KNOWN;
@@ -174,9 +178,14 @@ function inpaint(px, w, h, maskBits, radius) {
       estimate(ni, nj, w, h, flags, T, px, eps);
       flags[n] = BAND;
       heap.push(T[n], n);
+      if (++done >= nextReport) {
+        nextReport += step;
+        report(Math.min(90, Math.round((done / unknown) * 90)));
+      }
     }
   }
 
+  report(92);
   smoothFill(px, w, h, maskBits, eps, unknown);
 }
 
@@ -255,7 +264,7 @@ self.onmessage = e => {
     const md = mask.data;
     const bits = new Uint8Array(w * h);
     for (let n = 0, p = 3; n < bits.length; n++, p += 4) bits[n] = md[p] > 10 ? 1 : 0;
-    inpaint(px, w, h, bits, radius || 5);
+    inpaint(px, w, h, bits, radius || 5, pct => postMessage({ type: 'progress', pct }));
     postMessage({ type: 'result', patch: image }, [px.buffer]);
   } catch (err) {
     postMessage({ type: 'error', message: String((err && err.message) || err) });

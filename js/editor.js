@@ -786,6 +786,25 @@ export async function saveFile(blob, filename) {
 
 const slug = () => ed.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'flyer';
 
+// crop: the new pixels are a sub-rectangle of the old ones, so the layer has to
+// move by that offset at the current scale — otherwise trimming the left edge
+// slides the whole photo left and everything you'd lined it up with is off.
+export async function cropImageSource(obj, dataURL, off) {
+  const sx = obj.scaleX, sy = obj.scaleY;
+  const rad = ((obj.angle || 0) * Math.PI) / 180;
+  const dx = off.x * sx, dy = off.y * sy;
+  await obj.setSrc(dataURL);
+  obj.set({
+    scaleX: sx, scaleY: sy,
+    left: obj.left + dx * Math.cos(rad) - dy * Math.sin(rad),
+    top: obj.top + dx * Math.sin(rad) + dy * Math.cos(rad),
+  });
+  obj.setCoords();
+  ed.canvas.requestRenderAll();
+  pushSnapshot(); markDirty();
+  emit('layers'); emit('selection');
+}
+
 // swap an image's pixels (erase result); keeps transforms, one undo entry
 export async function swapImageSource(obj, dataURL) {
   await obj.setSrc(dataURL);

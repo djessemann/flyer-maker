@@ -54,15 +54,24 @@
 </div>
 
 <!-- ============ erase (object removal) ============ -->
-<div id="retouch">
+<div id="retouch" class="fullmode">
   <div class="rt-top">
     <button class="pill ghost" id="rtCancel">cancel</button>
+    <div class="spacer"></div>
+    <!-- zoom lives here: masking a small thing on a big photo needs to get close -->
+    <div class="zoomer" id="rtZoom">
+      <button data-z="out" aria-label="zoom out">–</button>
+      <button data-z="fit" id="rtZoomVal">fit</button>
+      <button data-z="in" aria-label="zoom in">+</button>
+    </div>
     <div class="spacer"></div>
     <button class="pill" id="rtGo">erase it</button>
   </div>
   <div class="rt-stage" id="rtStage">
-    <canvas id="rtImg"></canvas>
-    <canvas id="rtMask"></canvas>
+    <div class="rt-wrap" id="rtWrap">
+      <canvas id="rtImg"></canvas>
+      <canvas id="rtMask"></canvas>
+    </div>
   </div>
   <div class="rt-bar">
     <!-- the instruction sits with the controls so it's visible on every size -->
@@ -77,6 +86,36 @@
       <div class="seg" id="rtMode"><button data-m="paint" class="on">paint</button><button data-m="erase">unpaint</button></div>
       <button class="pill ghost" id="rtUndo">undo</button>
       <button class="pill ghost" id="rtClear">clear</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ crop mode ============ -->
+<div id="crop" class="fullmode">
+  <div class="rt-top">
+    <button class="pill ghost" id="cpCancel">cancel</button>
+    <div class="spacer"></div>
+    <button class="pill" id="cpGo">crop it</button>
+  </div>
+  <div class="rt-stage" id="cpStage">
+    <div class="cp-wrap" id="cpWrap">
+      <canvas id="cpImg"></canvas>
+      <div class="cp-rect" id="cpRect">
+        <span class="cp-h" data-h="nw"></span><span class="cp-h" data-h="ne"></span>
+        <span class="cp-h" data-h="sw"></span><span class="cp-h" data-h="se"></span>
+      </div>
+    </div>
+  </div>
+  <div class="rt-bar">
+    <div class="rt-title" id="cpHint">drag the corners to choose what to keep</div>
+    <div class="rt-tools">
+      <div class="seg" id="cpAspect">
+        <button data-r="free" class="on">free</button>
+        <button data-r="flyer">flyer</button>
+        <button data-r="1">square</button>
+        <button data-r="0.8">4:5</button>
+      </div>
+      <button class="pill ghost" id="cpReset">reset</button>
     </div>
   </div>
 </div>
