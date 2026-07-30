@@ -406,10 +406,10 @@ ok(Math.abs((p2.top - p1.top) - 10) < 0.01, `and then moves exactly 10px (${(p2.
 await tap('#actionbar [data-done]');
 ok((await bar()).includes('move'), 'done returns the normal bar');
 
-// ---------- erase: does the object actually leave, and what replaces it? ----------
-// The measurement that matters is not "is it different now" — the old fill
-// changed the pixels too and left a person-shaped blur. Assert the object is
-// gone AND that what replaced it has the texture of the photo around it.
+// ---------- erase: an eraser, so the pixels have to actually go ----------
+// Two previous versions filled the hole back in and both smeared. This one only
+// removes: the test is that the rubbed pixels are transparent, the rest of the
+// photo is untouched, and the flyer behind shows through in the export.
 await page.evaluate(async () => {
   const m = await import('./js/editor.js');
   const i = m.ed.canvas.getObjects().find(o => o.pKind === 'image');
@@ -424,6 +424,9 @@ const hintVisible = await page.evaluate(() => {
            text: t.textContent };
 });
 ok(hintVisible.shown, `instruction visible on a phone — "${hintVisible.text}"`);
+// erased pixels must read as gone, not as whatever colour is behind the stage
+ok(await page.locator('#rtWrap').evaluate(e => getComputedStyle(e).backgroundImage.includes('gradient')),
+   'the photo sits on a chequerboard, so "erased" is legible');
 ok(await page.locator('#rtZoom').isVisible(), 'erase has a zoom control');
 await tap('#rtZoom [data-z="in"]');
 const zoomed = await page.evaluate(() =>
@@ -431,29 +434,44 @@ const zoomed = await page.evaluate(() =>
 ok(zoomed > 1.2, `zoom really scales the photo (${zoomed.toFixed(2)}x)`);
 await tap('#rtZoom [data-z="fit"]');
 
-// paint over the white square at native 400,300..510,410
-const mbox = await page.locator('#rtMask').boundingBox();
-const sc = mbox.width / 900;
-const cx = mbox.x + 455 * sc, cy = mbox.y + 355 * sc;
-await page.mouse.move(cx - 70 * sc, cy - 70 * sc);
-await page.mouse.down();
-for (let i = -70; i <= 70; i += 10) {
-  await page.mouse.move(cx + i * sc, cy - 60 * sc, { steps: 2 });
-  await page.mouse.move(cx + i * sc, cy + 60 * sc, { steps: 2 });
-}
-await page.mouse.up();
-await page.waitForTimeout(200);
-await page.evaluate(() => {
-  window.__hints = [];
-  new MutationObserver(() => window.__hints.push(document.querySelector('#rtHint').textContent))
-    .observe(document.querySelector('#rtHint'), { childList: true, characterData: true, subtree: true });
+// rub over the white square at native 400,300..510,410
+const ibox = await page.locator('#rtImg').boundingBox();
+const sc = ibox.width / 900;
+const cx = ibox.x + 455 * sc, cy = ibox.y + 355 * sc;
+const rub = async () => {
+  await page.mouse.move(cx - 55 * sc, cy - 55 * sc);
+  await page.mouse.down();
+  for (let i = -55; i <= 55; i += 10) {
+    await page.mouse.move(cx + i * sc, cy - 50 * sc, { steps: 2 });
+    await page.mouse.move(cx + i * sc, cy + 50 * sc, { steps: 2 });
+  }
+  await page.mouse.up();
+  await page.waitForTimeout(150);
+};
+await rub();
+// it happens as you drag — there is no engine to wait for and nothing to run
+const live = await page.evaluate(() => {
+  const c = document.querySelector('#rtImg');
+  const d = c.getContext('2d', { willReadFrequently: true }).getImageData(430, 330, 50, 50).data;
+  let clear = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] < 10) clear++;
+  return clear;
 });
-await tap('#rtGo');
-await page.waitForFunction(() => document.querySelector('#rtHint').textContent === 'gone',
-  null, { timeout: 90000 }).catch(() => {});
-ok((await page.locator('#rtHint').textContent()) === 'gone', 'the fill reported done');
-const seen = (await page.evaluate(() => window.__hints || [])).filter(t => /erasing… \d+%/.test(t));
-ok(seen.length >= 2, `progress counted up while it ran (${seen.length} updates)`);
+ok(live > 2000, `the pixels go while you drag, with nothing to run (${live}/2500 already clear)`);
+
+// undo puts a stroke back
+await tap('#rtUndo');
+const afterUndo = await page.evaluate(() => {
+  const c = document.querySelector('#rtImg');
+  const d = c.getContext('2d', { willReadFrequently: true }).getImageData(430, 330, 50, 50).data;
+  let clear = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] < 10) clear++;
+  return clear;
+});
+ok(afterUndo === 0, `undo puts the photo back (${afterUndo} clear pixels left)`);
+await rub();
+await tap('#rtDone');
+await page.waitForTimeout(700);
 
 const erased = await page.evaluate(async () => {
   const m = await import('./js/editor.js');
@@ -463,39 +481,48 @@ const erased = await page.evaluate(async () => {
   c.width = el.naturalWidth; c.height = el.naturalHeight;
   const g = c.getContext('2d', { willReadFrequently: true });
   g.drawImage(el, 0, 0);
-  const box = g.getImageData(400, 300, 110, 110).data;
-  let bright = 0;
-  for (let i = 0; i < box.length; i += 4) {
-    if (box[i] > 220 && box[i + 1] > 220 && box[i + 2] > 220) bright++;
-  }
-  // texture inside the filled square vs a clean patch of the same photo
-  const energy = d => {
-    let e = 0, n = 0;
-    const w = Math.sqrt(d.length / 4);
-    for (let y = 1; y < w - 1; y++) for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x;
-      for (let k = 0; k < 3; k++) e += Math.abs(d[i * 4 + k] - d[(i + 1) * 4 + k]);
-      n++;
-    }
-    return n ? e / n : 0;
+  const count = (x, y, w, h) => {
+    const d = g.getImageData(x, y, w, h).data;
+    let clear = 0, total = 0;
+    for (let i = 3; i < d.length; i += 4) { total++; if (d[i] < 10) clear++; }
+    return { clear, total };
   };
-  const clean = g.getImageData(120, 120, 110, 110).data;
-  return { bright, fill: energy(box), around: energy(clean),
-           alpha: Math.min(...[...box.filter((_, i) => i % 4 === 3)]) };
+  return { rubbed: count(430, 330, 50, 50), elsewhere: count(50, 50, 120, 120),
+           format: o.srcFormat };
 });
-ok(erased.bright === 0, `the object is gone from the pixels (${erased.bright} bright pixels left)`);
-ok(erased.alpha === 255, 'the fill is fully opaque, not a transparent hole');
-const ratio = erased.around ? erased.fill / erased.around : 0;
-ok(ratio > 0.35,
-   `and what replaced it has the photo's own texture (${ratio.toFixed(2)} of the surrounding detail) — ` +
-   'the old fill left a smooth blur here');
+ok(erased.rubbed.clear === erased.rubbed.total,
+   `the rubbed area is transparent in the layer (${erased.rubbed.clear}/${erased.rubbed.total})`);
+ok(erased.elsewhere.clear === 0,
+   `and the rest of the photo is untouched (${erased.elsewhere.clear} clear pixels away from the stroke)`);
+ok(erased.format === 'png',
+   'the layer is kept as png — a jpeg has no transparency to keep');
 
-// nothing painted: it must say so rather than silently do nothing
-await page.evaluate(() => { document.querySelector('#toast').textContent = ''; });
-await tap('#rtGo');
-await page.waitForTimeout(400);
-ok(/paint over something first/.test(await page.locator('#toast').textContent()),
-   'erasing with no mask explains itself');
+// the point of erasing: what is behind now shows through in the exported png
+const through = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  // isolate the photo: by this point the flyer also carries type, and a
+  // headline sitting over the hole would answer this question for us
+  const hidden = m.ed.canvas.getObjects().filter(o => o.pKind !== 'image' && o.pKind !== 'bg');
+  hidden.forEach(o => o.set('visible', false));
+  m.setBg('#cc3333');
+  const blob = await m.renderPNGBlob(1);
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(bmp, 0, 0);
+  const o = m.ed.canvas.getObjects().find(x => x.pKind === 'image');
+  const r = o.getBoundingRect();
+  // where the stroke was, in flyer coordinates
+  const px = Math.round(r.left + 455 * o.scaleX), py = Math.round(r.top + 355 * o.scaleY);
+  const d = g.getImageData(px, py, 1, 1).data;
+  m.setBg('#ffffff');
+  hidden.forEach(o => o.set('visible', true));
+  m.ed.canvas.requestRenderAll();
+  return [d[0], d[1], d[2]].join(',');
+});
+ok(through === '204,51,51',
+   `the flyer background shows through the hole in the export (read ${through}, wanted 204,51,51)`);
+await tap('[data-a="erase"]');
 await tap('#rtCancel');
 
 // ---------- layers / canvas / dedupe ----------

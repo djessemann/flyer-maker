@@ -5,7 +5,6 @@
   "description": "a flyer editor for the browser \u2014 the app itself has no build step; this file exists only for the test harness",
   "scripts": {
     "test": "node tests/run.mjs",
-    "test:inpaint": "node tests/inpaint.test.mjs",
     "test:mobile": "node tests/mobile.test.mjs",
     "test:fonts": "node tests/fonts.test.mjs",
     "test:offline": "node tests/offline.test.mjs",
