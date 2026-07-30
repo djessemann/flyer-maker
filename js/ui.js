@@ -5,7 +5,7 @@ import {
   ed, fabric, PRESETS, layerName, markDirty,
   addText, addShape, addImageFromFile, replaceImage, resetImageSize,
   duplicateObject, deleteObject, reorder, setLocked, setVisible,
-  resizeDoc, setBg, collectDocColors, maxExportScale,
+  resizeDoc, setBg, collectDocColors, maxExportScale, tuneAllHandles,
   renderPNGBlob, exportFilename, projectBlob, projectFilename, saveFile,
 } from './editor.js';
 import {
@@ -22,6 +22,7 @@ let stack = [];          // sheet history, for the back chevron
 let sampling = null;     // pending eyedropper callback
 let inlineOpen = false;  // an inline slider has taken over the bar
 let savedVpt = null;     // viewport to restore after a sheet pans the canvas
+let sheetOwner = null;   // the layer the open sheet belongs to, if any
 
 /* ================= icons ================= */
 
@@ -130,6 +131,7 @@ function hideSheet() {
   sheetEl.classList.remove('on', 'tall');
   overlayEl.classList.remove('on');
   stack = [];
+  sheetOwner = null;
 }
 
 function sheetBack() {
@@ -194,8 +196,25 @@ export function initUI() {
   on('selection', () => { if (!inlineOpen) renderBar(); });
   on('layers', () => { if (!inlineOpen) renderBar(); refreshSheet(); });
   on('doc:open', () => { closeSheet(); renderBar(); });
-  on('doc:change', refreshSheet);
   on('toast', showToast);
+
+  // undo/redo rebuilds every object, so any sheet or inline slider still on
+  // screen is wired to a detached one: it reported values that no longer
+  // existed and its edits went nowhere. Let go of all of it.
+  on('doc:restored', () => {
+    inlineOpen = false;
+    savedVpt = null;
+    closeSheet();
+    renderBar();
+  });
+
+  // a resize re-fits the canvas; keeping the pre-sheet viewport would undo that
+  on('doc:change', () => { savedVpt = null; refreshSheet(); });
+
+  // a sheet outlives the layer it belongs to unless we close it
+  ed.canvas.on('object:removed', e => {
+    if (e.target && e.target === sheetOwner) closeSheet();
+  });
 
   ed.canvas.on('mouse:down', onCanvasSample);
   ed.canvas.on('text:editing:entered', renderEditingBar);
@@ -312,6 +331,7 @@ function markScrollable(bar) {
 }
 
 async function runAction(key, o) {
+  sheetOwner = o && o.pKind !== 'bg' ? o : null;
   // the bar stays live above an open sheet — tapping another action swaps the
   // sheet rather than stacking, so you can move colour → font → size freely
   const SHEETY = ['add', 'add-shape', 'layers', 'canvas', 'font', 'fill', 'stroke', 'adjust', 'more'];
@@ -492,8 +512,18 @@ export function sheetColor(title, initial, onChange, opts = {}) {
       track(hue, x => { h = Math.round(x * 360) % 360; });
 
       root.querySelectorAll('.sw[data-c]').forEach(b => b.addEventListener('click', () => {
-        ({ h, s, v } = hexToHsv(b.dataset.c));
-        paint();
+        // apply the swatch's own hex. Going through HSV and back drifts a few
+        // of them by a digit, so they never read as selected and each tap
+        // added a near-duplicate to the document's colour list.
+        const hex = b.dataset.c;
+        ({ h, s, v } = hexToHsv(hex));
+        current = hex;
+        onChange(hex);
+        paint(false);
+        cur.style.background = hex;
+        hexIn.value = hex;
+        root.querySelectorAll('.sw[data-c]').forEach(el =>
+          el.classList.toggle('cur', el.dataset.c.toLowerCase() === hex.toLowerCase()));
         if (!inlineOpen) renderBar();
       }));
       const none = root.querySelector('[data-none]');
@@ -891,6 +921,7 @@ function sheetLayers() {
           <span class="lname" data-name>${esc(layerName(o))}</span>
         </button>
         <span class="lacts">
+          <button class="icon-btn" data-rename title="rename">${I.edit}</button>
           <button class="icon-btn" data-up ${i === 0 ? 'disabled' : ''}>${I.fwd}</button>
           <button class="icon-btn" data-down ${i === objs.length - 1 ? 'disabled' : ''}>${I.back}</button>
           <button class="icon-btn ${o.visible ? 'act-on' : ''}" data-eye>${o.visible ? I.eye : I.eyeOff}</button>
@@ -923,15 +954,22 @@ function sheetLayers() {
         row.querySelector('[data-down]').addEventListener('click', () => reorder(o, 'backward'));
         row.querySelector('[data-eye]').addEventListener('click', () => setVisible(o, !o.visible));
         row.querySelector('[data-lock]').addEventListener('click', () => setLocked(o, !o.pLocked));
-        row.querySelector('[data-name]').addEventListener('dblclick', e => {
-          e.stopPropagation();
-          const el = e.currentTarget;
+        const startRename = el => {
           el.innerHTML = `<input value="${esc(o.pName || layerName(o))}">`;
           const input = el.querySelector('input');
           input.focus(); input.select();
           const done = () => { o.pName = input.value.trim() || null; markDirty(true); refreshSheet(); };
           input.addEventListener('blur', done);
           input.addEventListener('keydown', ev => { if (ev.key === 'Enter') input.blur(); });
+        };
+        row.querySelector('[data-rename]').addEventListener('click', e => {
+          e.stopPropagation();
+          startRename(row.querySelector('[data-name]'));
+        });
+        // still works with a mouse
+        row.querySelector('[data-name]').addEventListener('dblclick', e => {
+          e.stopPropagation();
+          startRename(e.currentTarget);
         });
       });
       root.querySelector('[data-bgrow]').addEventListener('click', sheetCanvas);

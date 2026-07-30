@@ -6,6 +6,7 @@
 import { readFileSync } from 'fs';
 import {
   serveRepo, shimCDN, launchBrowser, assertPinnedVersions, PHONE, reporter,
+  pollUntil, LAYER_SNAPSHOT,
 } from './lib/harness.mjs';
 
 const R = reporter('mobile suite');
@@ -52,6 +53,10 @@ const addPhoto = () => page.evaluate(async () => {
 
 await page.goto(origin + '/');
 await page.waitForTimeout(1100);
+const exposeEd = () => page.evaluate(async () => {
+  window.__pasteupEd = (await import('./js/editor.js')).ed;
+});
+await exposeEd();
 
 // ---------- home ----------
 ok(await page.locator('#btnNew').isVisible(), 'home: new flyer button visible');
@@ -115,12 +120,24 @@ const overlapFor = async key => {
     const s = document.querySelector('#sheet').getBoundingClientRect();
     const ox = Math.max(0, Math.min(box.left+box.w, s.right) - Math.max(box.left, s.left));
     const oy = Math.max(0, Math.min(box.top+box.h, s.bottom) - Math.max(box.top, s.top));
-    return Math.round((ox*oy)/(box.w*box.h)*100);
+    // also: how much of the layer is inside the strip left visible above the
+    // sheet. Zero overlap is equally true of an object panned off-screen, which
+    // is the regression this assertion exists to catch.
+    const strip = { top: el.top, bottom: s.top };
+    const vx = Math.max(0, Math.min(box.left+box.w, innerWidth) - Math.max(box.left, 0));
+    const vy = Math.max(0, Math.min(box.top+box.h, strip.bottom) - Math.max(box.top, strip.top));
+    return {
+      pct: Math.round((ox*oy)/(box.w*box.h)*100),
+      visible: Math.round((vx*vy)/(box.w*box.h)*100),
+    };
   });
   return pct;
 };
 const covColor = await overlapFor('fill');
-ok(covColor === 0, `FIX: colour sheet covers ${covColor}% of the text (was 100%)`);
+ok(covColor.pct === 0, `FIX: colour sheet covers ${covColor.pct}% of the text (was 100%)`);
+ok(covColor.visible === 100,
+   `and the text is fully inside the visible strip (${covColor.visible}%) — 0% overlap ` +
+   'would also be true of a layer panned off-screen');
 // and the change is applied live while visible
 await tap('#sheetBody .sw[data-c="#cc3333"]');
 ok((await active()).fill === '#cc3333', 'swatch applies: ' + (await active()).fill);
@@ -137,15 +154,15 @@ ok((await active()).fill !== '#22423b', 'hue drag applies: ' + (await active()).
 await tap('#sheetClose');
 
 const covFont = await overlapFor('font');
-ok(covFont === 0, `FIX: font sheet covers ${covFont}% of the text (was 100%)`);
+ok(covFont.pct === 0, `FIX: font sheet covers ${covFont.pct}% of the text (was 100%)`);
+ok(covFont.visible === 100, `and the text stays fully visible above it (${covFont.visible}%)`);
 ok((await page.locator('#sheetBody .frow').count()) > 20, 'font list populated');
 await page.fill('#sheetBody [data-q]', 'anton');
 await page.waitForTimeout(300);
 ok((await page.locator('#sheetBody .frow').count()) <= 3, 'font search narrows');
 await page.locator('#sheetBody .frow[data-fam="Anton"]').first().tap();
-await page.waitForFunction(async () =>
-  (await import('./js/editor.js')).ed.canvas.getActiveObject().fontFamily === 'Anton',
-  null, { timeout: 12000 }).catch(()=>{});
+await pollUntil(page, async () =>
+  (await import('./js/editor.js')).ed.canvas.getActiveObject().fontFamily === 'Anton', 12000);
 ok((await active()).fontFamily === 'Anton', 'font applies: ' + (await active()).fontFamily);
 ok(await page.locator('#sheetBody [data-load]').isVisible(), 'load-any-google-font present');
 await tap('#sheetClose');
@@ -187,7 +204,13 @@ await page.$eval('#sheetBody [data-op]', el => { el.value=60; el.dispatchEvent(n
 await page.waitForTimeout(200);
 ok(Math.abs((await active()).opacity-0.6) < .001, 'opacity (in more)');
 await tap('#sheetBody [data-pos="cx"]');
-ok(true, 'centre across ran');
+const centred = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const o = m.ed.canvas.getActiveObject();
+  const r = o.getBoundingRect();
+  return Math.abs(r.left + r.width / 2 - m.ed.docW / 2);
+});
+ok(centred < 1.5, `centre across really centres it (off by ${centred.toFixed(2)}px)`);
 await tap('#sheetClose');
 
 // ---------- shapes ----------
@@ -224,7 +247,15 @@ await tap('[data-a="adjust"]');
 await tap('#sheetBody [data-f="x"]');
 ok((await active()).flipX === true, 'flip (in adjust)');
 await tap('#sheetBody [data-fit]');
-ok(true, 'fit (in adjust)');
+const fitted = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const o = m.ed.canvas.getObjects().find(x => x.pKind === 'image');
+  const want = Math.min(m.ed.docW / o.width, m.ed.docH / o.height);
+  return { d: Math.abs(o.scaleX - want), angle: o.angle,
+           dx: Math.abs(o.left - (m.ed.docW - o.width * o.scaleX) / 2) };
+});
+ok(fitted.d < 1e-6 && fitted.angle === 0 && fitted.dx < 1,
+   `fit really fits and centres (scale off ${fitted.d.toExponential(1)}, dx ${fitted.dx.toFixed(1)})`);
 await tap('#sheetClose');
 
 // ---------- FIX 6: erase instructions visible on a phone ----------
@@ -252,27 +283,85 @@ await tap('#rtGo');
 await page.waitForFunction(() => document.querySelector('#rtHint').textContent.includes('gone'),
   null, { timeout: 60000 }).catch(()=>{});
 ok((await page.locator('#rtHint').textContent()).includes('gone'), 'inpaint reported done');
-const bright = await page.evaluate(async () => {
+// "no longer white" would also be satisfied by a black hole, a transparent one,
+// or a patch composited at the wrong offset. Require the fill to match what
+// surrounds it, and require the rest of the photo to be untouched.
+const erased = await page.evaluate(async () => {
   const m = await import('./js/editor.js');
-  const o = m.ed.canvas.getObjects().find(x=>x.pKind==='image');
+  const o = m.ed.canvas.getObjects().find(x => x.pKind === 'image');
   const el = o._element;
-  const c = document.createElement('canvas'); c.width=el.naturalWidth; c.height=el.naturalHeight;
-  c.getContext('2d').drawImage(el,0,0);
-  const d = c.getContext('2d').getImageData(430,330,50,50).data;
-  let n=0; for(let i=0;i<d.length;i+=4) if(d[i]>200&&d[i+1]>200&&d[i+2]>200) n++;
-  return n;
+  const c = document.createElement('canvas');
+  c.width = el.naturalWidth; c.height = el.naturalHeight;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(el, 0, 0);
+  const mean = (x, y, w, h) => {
+    const d = g.getImageData(x, y, w, h).data;
+    const t = [0, 0, 0]; let n = 0, minA = 255;
+    for (let i = 0; i < d.length; i += 4) { t[0]+=d[i]; t[1]+=d[i+1]; t[2]+=d[i+2]; if (d[i+3]<minA) minA=d[i+3]; n++; }
+    return { c: t.map(v => Math.round(v / n)), minA };
+  };
+  const hole = mean(430, 330, 50, 50);
+  const left = mean(300, 330, 40, 40);
+  const right = mean(600, 330, 40, 40);
+  const far = mean(40, 40, 40, 40);
+  let bright = 0;
+  const d = g.getImageData(430, 330, 50, 50).data;
+  for (let i = 0; i < d.length; i += 4) if (d[i] > 200 && d[i+1] > 200 && d[i+2] > 200) bright++;
+  return { hole, left, right, far, bright };
 });
-ok(bright === 0, 'object removed from the actual pixels (bright px left: '+bright+')');
+ok(erased.bright === 0, `the object is gone (${erased.bright} bright pixels left)`);
+const expect = erased.hole.c.map((_, i) => Math.round((erased.left.c[i] + erased.right.c[i]) / 2));
+const off = Math.max(...erased.hole.c.map((v, i) => Math.abs(v - expect[i])));
+ok(off <= 12,
+   `and the fill matches what surrounds it (${erased.hole.c} vs neighbours ${expect}, off by ${off}/255)`);
+ok(erased.hole.minA === 255, `the fill is fully opaque (min alpha ${erased.hole.minA})`);
+ok(erased.far.c.every(v => v > 0),
+   `the rest of the photo is untouched (far corner ${erased.far.c}) — a mis-offset patch would show here`);
+// no mask painted: it must tell you, not silently do nothing
+await page.evaluate(() => { document.querySelector('#toast').textContent = ''; });
+await tap('#rtGo');
+await page.waitForTimeout(400);
+const emptyMsg = await page.locator('#toast').textContent();
+ok(/paint over something first/.test(emptyMsg),
+   `erasing with no mask explains itself ("${emptyMsg}")`);
+
+// undo inside erase mode reverts an applied erase, which cancel never did
 await tap('#rtCancel');
 
 // ---------- layers / canvas / dedupe ----------
 await tap('[data-a="more"]');
 await tap('#sheetBody [data-m="layers"]');
 ok((await page.locator('#sheetBody .lrow[data-i]').count()) === 3, 'layers lists 3 layers');
+// visibility must actually remove it from what gets rendered, not just flip a flag
+const eyeOff = await (async () => {
+  await tap('#sheetBody .lrow[data-i="1"] [data-eye]');
+  return page.evaluate(async () => {
+    const m = await import('./js/editor.js');
+    const objs = m.ed.canvas.getObjects().filter(o => o.pKind !== 'bg').reverse();
+    return objs[1] ? objs[1].visible : null;
+  });
+})();
+ok(eyeOff === false, 'the eye button really hides the layer');
 await tap('#sheetBody .lrow[data-i="1"] [data-eye]');
-await tap('#sheetBody .lrow[data-i="1"] [data-eye]');
+const eyeOn = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const objs = m.ed.canvas.getObjects().filter(o => o.pKind !== 'bg').reverse();
+  return objs[1] ? objs[1].visible : null;
+});
+ok(eyeOn === true, 'and shows it again');
+
+// reorder must move the layer exactly one slot, not merely not throw
+const before = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  return m.ed.canvas.getObjects().map(o => o.pKind);
+});
 await tap('#sheetBody .lrow[data-i="2"] [data-up]');
-ok(true, 'visibility + reorder work');
+const afterOrder = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  return m.ed.canvas.getObjects().map(o => o.pKind);
+});
+ok(JSON.stringify(before) !== JSON.stringify(afterOrder),
+   `reorder moved a layer (${before.join(',')} -> ${afterOrder.join(',')})`);
 const bgButtons = await page.locator('#sheetBody [data-bgrow]').count();
 ok(bgButtons === 1, 'FIX: layers shows background as a pointer to canvas, not a second colour control');
 await tap('#sheetBody [data-bgrow]');
@@ -306,6 +395,14 @@ const dl = page.waitForEvent('download', { timeout: 25000 }).catch(()=>null);
 await tap('#sheetBody [data-save]');
 const file = await dl;
 ok(!!file && /\.png$/.test(file.suggestedFilename()), 'png saved: ' + (file && file.suggestedFilename()));
+// doc §8 spells out the filename; only asserting /\.png$/ let it drift
+const wantName = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  return m.exportFilename(2);   // this save ran at 2x, so the name carries @2x
+});
+ok(file && file.suggestedFilename() === wantName,
+   `the filename follows the documented shape (${file && file.suggestedFilename()})`);
+ok(/^[a-z0-9-]+-\d+x\d+(@\dx)?\.png$/.test(wantName), `and it is name-WxH[@Nx].png (${wantName})`);
 // and it's a genuine png on disk, not a truncated blob
 if (file) {
   const path = await file.path();
@@ -320,6 +417,51 @@ const dl2 = page.waitForEvent('download', { timeout: 20000 }).catch(()=>null);
 await tap('#sheetBody [data-proj]');
 const pf = await dl2;
 ok(!!pf && /\.pasteup\.json$/.test(pf.suggestedFilename()), 'project file saved: ' + (pf && pf.suggestedFilename()));
+
+// ---------- and it can be imported back: the whole point of the format ----------
+const projSnapshot = await page.evaluate(LAYER_SNAPSHOT);
+if (pf) {
+  const projPath = await pf.path();
+  await tap('#sheetClose');
+  await tap('#btnBack');
+  await page.waitForTimeout(600);
+  const chooser = page.waitForEvent('filechooser', { timeout: 10000 });
+  await page.locator('#btnImport').tap();
+  (await chooser).setFiles(projPath);
+  await page.waitForTimeout(1500);
+  await exposeEd();
+  const imported = await page.evaluate(LAYER_SNAPSHOT);
+  const same = JSON.stringify(projSnapshot.objs.map(o => [o.pKind, o.text, o.fill, o.pName]))
+            === JSON.stringify(imported.objs.map(o => [o.pKind, o.text, o.fill, o.pName]));
+  ok(await page.locator('#viewEditor').isVisible() && same
+     && imported.docW === projSnapshot.docW && imported.bg === projSnapshot.bg,
+     `a saved project file imports back intact (${imported.objs.length} layers, ` +
+     `${imported.docW}x${imported.docH}, bg ${imported.bg})`);
+  const photoOk = await page.evaluate(async () => {
+    const m = await import('./js/editor.js');
+    const o = m.ed.canvas.getObjects().find(x => x.pKind === 'image');
+    return o && o._element ? o._element.naturalWidth : 0;
+  });
+  ok(photoOk > 0, `the imported photo has real pixels (${photoOk}px wide)`);
+}
+
+// a file that isn't ours must be refused, with an explanation
+await page.evaluate(() => { document.querySelector('#toast').textContent = ''; });
+await tap('#btnBack');
+await page.waitForTimeout(500);
+const badChooser = page.waitForEvent('filechooser', { timeout: 10000 });
+await page.locator('#btnImport').tap();
+(await badChooser).setFiles({ name: 'nope.json', mimeType: 'application/json',
+  buffer: Buffer.from(JSON.stringify({ app: 'notpasteup' })) });
+await page.waitForTimeout(900);
+const badMsg = await page.locator('#toast').textContent();
+ok(/doesn.t look like a pasteup project/.test(badMsg) && await page.locator('#viewHome').isVisible(),
+   `a foreign json file is refused with an explanation ("${badMsg}")`);
+
+// back into the flyer for the rest of the run
+await tap('#projectGrid .proj');
+await page.waitForTimeout(1200);
+await exposeEd();
 
 // the photo picker must be openable — display:none inputs can refuse on mobile
 const inputOk = await page.evaluate(() => {
@@ -340,16 +482,68 @@ await page.locator('#actionbar [data-a="add-photo"]').first().tap();
 await page.waitForTimeout(700);
 ok(picked, 'FIX: tapping "photo" actually opens the file picker');
 
-// ---------- persistence ----------
+// ---------- persistence: every property, not just the layer types ----------
+// A type-only check let real data loss ship: with PROPS trimmed, layer names
+// were erased and *locked layers came back unlocked*, and the suite stayed green.
+// Give the layers distinguishing state first so there is something to lose.
+await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const objs = m.ed.canvas.getObjects().filter(o => o.pKind !== 'bg');
+  objs.forEach((o, i) => { o.pName = 'layer ' + i; });
+  const shape = objs.find(o => o.pKind === 'rounded');
+  if (shape) { shape.pLocked = true; shape.selectable = false; shape.evented = false; }
+  const txt = objs.find(o => o.pKind === 'text');
+  if (txt) txt.set({ opacity: 0.65, charSpacing: 120 });
+  m.ed.canvas.requestRenderAll();
+});
+const beforeSave = await page.evaluate(LAYER_SNAPSHOT);
+const docId = await page.evaluate(async () => (await import('./js/editor.js')).ed.id);
 await page.evaluate(async () => (await import('./js/editor.js')).flushSave());
-await page.waitForTimeout(500);
+await page.waitForTimeout(600);
 await page.reload();
 await page.waitForTimeout(1200);
-ok((await page.locator('#projectGrid .proj').count()) === 1, 'project listed after reload');
-await tap('#projectGrid .proj');
-await page.waitForTimeout(1000);
-const k2 = await kinds();
-ok(k2.includes('image') && k2.includes('text'), 'layers restored: ' + k2.join(','));
+// target this flyer by id: earlier import checks legitimately leave more than one
+ok((await page.locator(`#projectGrid [data-id="${docId}"]`).count()) === 1,
+   'this flyer is listed on the home screen after a reload');
+await tap(`#projectGrid [data-id="${docId}"]`);
+await page.waitForTimeout(1200);
+await exposeEd();
+const afterSave = await page.evaluate(LAYER_SNAPSHOT);
+if (JSON.stringify(beforeSave) === JSON.stringify(afterSave)) {
+  ok(true, `every layer property survived save -> reload (${afterSave.objs.length} layers, ` +
+           `${afterSave.docW}x${afterSave.docH}, bg ${afterSave.bg})`);
+} else {
+  // name the first thing that changed, so the failure is actionable
+  const diffs = [];
+  if (beforeSave.objs.length !== afterSave.objs.length) {
+    diffs.push(`layer count ${beforeSave.objs.length} -> ${afterSave.objs.length}`);
+  }
+  for (const k of ['docW', 'docH', 'bg']) {
+    if (beforeSave[k] !== afterSave[k]) diffs.push(`${k}: ${beforeSave[k]} -> ${afterSave[k]}`);
+  }
+  beforeSave.objs.forEach((b, i) => {
+    const a = afterSave.objs[i] || {};
+    for (const k of Object.keys(b)) {
+      if (JSON.stringify(b[k]) !== JSON.stringify(a[k])) {
+        diffs.push(`layer ${i} (${b.pKind}) ${k}: ${JSON.stringify(b[k])} -> ${JSON.stringify(a[k])}`);
+      }
+    }
+  });
+  ok(false, 'save -> reload lost data: ' + diffs.slice(0, 8).join('; '));
+}
+// a restored photo must still have real pixels, not a dead src
+const photoAlive = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const o = m.ed.canvas.getObjects().find(x => x.pKind === 'image');
+  if (!o || !o._element || !o._element.naturalWidth) return null;
+  const c = document.createElement('canvas');
+  c.width = c.height = 8;
+  c.getContext('2d').drawImage(o._element, 0, 0, 8, 8);
+  const d = c.getContext('2d').getImageData(2, 2, 1, 1).data;
+  return { w: o._element.naturalWidth, px: [d[0], d[1], d[2]], alpha: d[3] };
+});
+ok(photoAlive && photoAlive.w > 0 && photoAlive.alpha === 255,
+   `the restored photo still has pixels (${photoAlive ? photoAlive.w + 'px, rgb ' + photoAlive.px : 'GONE'})`);
 
 // ---------- viewport restored after a sheet pans ----------
 const vptBefore = await page.evaluate(async () => [...(await import('./js/editor.js')).ed.canvas.viewportTransform]);
@@ -367,6 +561,262 @@ ok(JSON.stringify(vptBefore) === JSON.stringify(vptAfter),
 
 const scrollW = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
 ok(scrollW, 'no horizontal page overflow at 393px');
+
+// ---------- keyboard, undo/redo and rename: claimed verified, never tested ----------
+await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const u = await import('./js/ui.js');
+  const t = m.ed.canvas.getObjects().find(o => o.pKind === 'text');
+  m.ed.canvas.setActiveObject(t); m.ed.canvas.requestRenderAll(); u.renderBar();
+});
+await page.waitForTimeout(300);
+const nudged = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const o = m.ed.canvas.getActiveObject();
+  const start = o.left;
+  document.body.focus();
+  return { start, left: o.left };
+});
+await page.keyboard.press('ArrowRight');
+await page.waitForTimeout(120);
+const after1 = await page.evaluate(async () =>
+  (await import('./js/editor.js')).ed.canvas.getActiveObject().left);
+ok(Math.abs(after1 - nudged.start - 1) < 0.01, `arrow key nudges exactly 1px (moved ${(after1-nudged.start).toFixed(2)})`);
+await page.keyboard.press('Shift+ArrowRight');
+await page.waitForTimeout(120);
+const after2 = await page.evaluate(async () =>
+  (await import('./js/editor.js')).ed.canvas.getActiveObject().left);
+ok(Math.abs(after2 - after1 - 10) < 0.01, `shift+arrow nudges exactly 10px (moved ${(after2-after1).toFixed(2)})`);
+
+// undo must restore a real value, and it must still work with a slider focused
+const undoWorks = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const o = m.ed.canvas.getActiveObject();
+  const before = o.fill;
+  o.set('fill', '#7fa650');
+  m.ed.canvas.requestRenderAll();
+  m.pushSnapshot();
+  await new Promise(r => setTimeout(r, 400));
+  await m.undo();
+  await new Promise(r => setTimeout(r, 400));
+  const now = m.ed.canvas.getObjects().find(x => x.pKind === 'text');
+  return { before, after: now ? now.fill : null };
+});
+ok(undoWorks.after === undoWorks.before,
+   `undo restores the previous value (${undoWorks.before} -> changed -> ${undoWorks.after})`);
+
+// a focused slider used to swallow cmd-Z entirely
+const undoWithSliderFocus = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const u = await import('./js/ui.js');
+  const t = m.ed.canvas.getObjects().find(o => o.pKind === 'text');
+  m.ed.canvas.setActiveObject(t); u.renderBar();
+  document.querySelector('#actionbar [data-a="size"]').click();
+  await new Promise(r => setTimeout(r, 350));
+  const slider = document.querySelector('#actionbar [data-in]');
+  if (!slider) return { ok: false, why: 'no inline slider' };
+  slider.focus();
+  return { ok: true, focused: document.activeElement === slider, type: slider.type };
+});
+ok(undoWithSliderFocus.ok && undoWithSliderFocus.focused, 'an inline slider can take focus');
+// real check: change something, focus the slider, press cmd-Z, and require the
+// document to actually revert. (An assertion like `x !== null` here would pass
+// no matter what — the exact failure mode this suite is meant to have stopped.)
+const beforeKey = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const o = m.ed.canvas.getActiveObject();
+  const was = Math.round(o.fontSize);
+  o.set('fontSize', was + 40);
+  m.ed.canvas.requestRenderAll();
+  m.pushSnapshot();
+  await new Promise(r => setTimeout(r, 400));
+  document.querySelector('#actionbar [data-in]')?.focus();
+  return { was, bumped: Math.round(o.fontSize), focused: document.activeElement?.type };
+});
+await page.keyboard.press('Meta+z');
+await page.waitForTimeout(700);
+const afterKey = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const t = m.ed.canvas.getObjects().find(o => o.pKind === 'text');
+  return t ? Math.round(t.fontSize) : null;
+});
+ok(beforeKey.focused === 'range' && afterKey === beforeKey.was,
+   `cmd-Z still undoes with a slider focused (${beforeKey.was} -> ${beforeKey.bumped} -> ${afterKey})`);
+await page.evaluate(() => { const d = document.querySelector('#actionbar [data-done]'); if (d) d.click(); });
+await page.waitForTimeout(250);
+
+// rename has to be reachable by touch, and has to persist
+await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  m.ed.canvas.discardActiveObject();
+  const u = await import('./js/ui.js'); u.renderBar();
+});
+await page.waitForTimeout(250);
+await tap('[data-a="layers"]');
+ok((await page.locator('#sheetBody .lrow[data-i="0"] [data-rename]').count()) === 1,
+   'FIX: layers rows have a rename button — a double-tap never fired dblclick on touch');
+await tap('#sheetBody .lrow[data-i="0"] [data-rename]');
+await page.fill('#sheetBody .lrow[data-i="0"] [data-name] input', 'my headline');
+await page.locator('#sheetBody .lrow[data-i="0"] [data-name] input').press('Enter');
+await page.waitForTimeout(400);
+const renamed = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  return m.ed.canvas.getObjects().filter(o => o.pKind !== 'bg').reverse()[0].pName;
+});
+ok(renamed === 'my headline', `rename by tap works (name is now ${JSON.stringify(renamed)})`);
+await tap('#sheetClose');
+
+// ---------- export: content, not just dimensions ----------
+// The one pixel test was two opaque rects at 1x. Nothing checked that text ever
+// produces ink, that a hidden layer is excluded, that opacity is honoured, or
+// that the shipped default (2x) has correct *content* rather than correct size.
+const exportPixels = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  m.ed.canvas.getObjects().slice().forEach(o => { if (o.pKind !== 'bg') m.ed.canvas.remove(o); });
+  m.resizeDoc(600, 600);
+  m.setBg('#ffffff');
+  const t = m.addText(); t.exitEditing();
+  t.set({ text: 'BLOCK', left: 40, top: 200, width: 520, fontSize: 120, fill: '#000000' });
+  t.initDimensions(); t.setCoords();
+  const half = m.addShape('rect');
+  half.set({ left: 40, top: 430, width: 200, height: 120, fill: '#000000', opacity: 0.5 });
+  m.ed.canvas.discardActiveObject();
+  m.ed.canvas.requestRenderAll();
+
+  const sample = async (scale, box) => {
+    const blob = await m.renderPNGBlob(scale);
+    const bmp = await createImageBitmap(blob);
+    const c = document.createElement('canvas');
+    c.width = bmp.width; c.height = bmp.height;
+    c.getContext('2d').drawImage(bmp, 0, 0);
+    const g = c.getContext('2d');
+    if (!box) return { g, w: bmp.width, h: bmp.height };
+    const d = g.getImageData(box.x * scale, box.y * scale, box.w * scale, box.h * scale).data;
+    let dark = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { n++; if (d[i] < 90 && d[i+1] < 90 && d[i+2] < 90) dark++; }
+    return { darkPct: Math.round(dark / n * 100), w: bmp.width, h: bmp.height };
+  };
+
+  const tb = t.getBoundingRect();
+  const textBox = { x: Math.round(tb.left), y: Math.round(tb.top), w: Math.round(tb.width), h: Math.round(tb.height) };
+  const withText = await sample(1, textBox);
+
+  // opacity: 50% black over white must land mid-grey
+  const one = await sample(1, null);
+  const mid = one.g.getImageData(120, 470, 1, 1).data;
+
+  // 2x and 3x must place the same content, not merely be the right size
+  const two = await sample(2, textBox);
+  const three = await sample(3, textBox);
+
+  // hide the text and the same region must come back blank
+  t.set('visible', false);
+  m.ed.canvas.requestRenderAll();
+  const hidden = await sample(1, textBox);
+  t.set('visible', true);
+  m.ed.canvas.requestRenderAll();
+
+  return { withText: withText.darkPct, hidden: hidden.darkPct,
+           mid: [mid[0], mid[1], mid[2]],
+           two: { pct: two.darkPct, w: two.w }, three: { pct: three.darkPct, w: three.w } };
+});
+ok(exportPixels.withText > 5,
+   `text actually produces ink in the png (${exportPixels.withText}% dark inside its box)`);
+ok(exportPixels.hidden === 0,
+   `a hidden layer is excluded from the export (${exportPixels.hidden}% dark where it was)`);
+ok(Math.abs(exportPixels.mid[0] - 128) < 8,
+   `opacity is honoured in the export (50% black over white read ${exportPixels.mid})`);
+ok(exportPixels.two.w === 1200 && exportPixels.two.pct > 5,
+   `2x export has the right content, not just the right size (${exportPixels.two.pct}% ink at ${exportPixels.two.w}px)`);
+ok(exportPixels.three.w === 1800 && exportPixels.three.pct > 5,
+   `3x export likewise (${exportPixels.three.pct}% ink at ${exportPixels.three.w}px)`);
+
+// ---------- export scale capping ----------
+const capping = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  m.resizeDoc(1650, 2550);
+  const maxAt = m.maxExportScale();
+  m.resizeDoc(9999, 9999);
+  return { maxAt, clampedW: m.ed.docW, clampedMax: m.maxExportScale() };
+});
+ok(capping.maxAt === 2, `a tabloid poster caps at 2x (got ${capping.maxAt}x) — 3x would be 4950x7650`);
+ok(capping.clampedW === 6000 && capping.clampedMax === 1,
+   `an oversized canvas clamps to 6000px and 1x (got ${capping.clampedW}px, ${capping.clampedMax}x)`);
+
+// ---------- regressions for the independently-reported bugs ----------
+
+// a 44px touch target on a layer only 34px tall on screen meant its own corner
+// handles blanketed it, so a drag meant to move it scaled it into a sliver
+const handles = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const t = m.ed.canvas.getObjects().find(o => o.pKind === 'text');
+  m.ed.canvas.setActiveObject(t);
+  m.ed.canvas.requestRenderAll();
+  const z = m.ed.canvas.getZoom();
+  const r = t.getBoundingRect();
+  return { screenH: r.height * z, screenW: r.width * z, touch: t.touchCornerSize, corner: t.cornerSize };
+});
+ok(handles.touch <= Math.min(handles.screenH, handles.screenW) / 2.5,
+   `handles stay proportional to the layer on screen (${handles.touch}px hit area on a ` +
+   `${Math.round(handles.screenH)}px-tall layer) — a fixed 44px used to cover it entirely`);
+
+// changing the canvas used to leave every layer at its old coordinates, so most
+// of the flyer ended up outside the frame and the export came back mostly blank
+const reflow = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  m.resizeDoc(1650, 2550);
+  const inside = () => m.ed.canvas.getObjects().filter(o => o.pKind !== 'bg').map(o => {
+    const r = o.getBoundingRect();
+    const ox = Math.max(0, Math.min(r.left + r.width, m.ed.docW) - Math.max(r.left, 0));
+    const oy = Math.max(0, Math.min(r.top + r.height, m.ed.docH) - Math.max(r.top, 0));
+    return Math.round((ox * oy) / (r.width * r.height) * 100);
+  });
+  const big = inside();
+  m.resizeDoc(1080, 1080);
+  return { big, small: inside() };
+});
+const worst = Math.min(...reflow.big, ...reflow.small);
+ok(worst >= 90,
+   `layers stay inside the frame across canvas changes (worst ${worst}% inside; ` +
+   'poster->square used to leave the photo 21% inside and the export 2/3 blank)');
+
+// undoing mid-erase used to walk past the photo's import; the finishing pass then
+// snapshotted an empty canvas and autosave made the blank flyer permanent
+const busyGuard = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const n = m.ed.canvas.getObjects().length;
+  m.ed.busy = true;
+  await m.undo();
+  const during = m.ed.canvas.getObjects().length;
+  m.ed.busy = false;
+  return { n, during };
+});
+ok(busyGuard.during === busyGuard.n,
+   'undo refuses to run while an erase owns the document');
+
+// an undo replaces every object, so anything still holding the old one must let go
+const detach = await page.evaluate(async () => {
+  const m = await import('./js/editor.js');
+  const u = await import('./js/ui.js');
+  const t = m.ed.canvas.getObjects().find(o => o.pKind === 'text');
+  m.ed.canvas.setActiveObject(t);
+  u.renderBar();
+  return new Promise(res => {
+    document.querySelector('#actionbar [data-a="size"]').click();
+    setTimeout(async () => {
+      const inlineBefore = document.querySelector('#actionbar').classList.contains('inline-mode');
+      await m.undo();
+      setTimeout(() => res({
+        inlineBefore,
+        inlineAfter: document.querySelector('#actionbar').classList.contains('inline-mode'),
+        sheetOpen: document.querySelector('#sheet').classList.contains('on'),
+      }), 400);
+    }, 350);
+  });
+});
+ok(detach.inlineBefore && !detach.inlineAfter && !detach.sheetOpen,
+   'an undo dismisses controls bound to the old objects (the ghost slider that ' +
+   'read 300px while the layer was 90px)');
 
 // ---------- destructive: rewrites the document, so it runs last ----------
 // ---------- the exported pixels are actually the flyer ----------

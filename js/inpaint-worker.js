@@ -143,7 +143,14 @@ function inpaint(px, w, h, maskBits, radius) {
     }
   }
 
-  const eps = Math.max(3, Math.min(12, radius | 0));
+  // Sampling radius, chosen against a work budget. A fixed small radius leaves
+  // a hard step and flat facets across a big fill, but cost grows as eps² per
+  // unknown pixel — so give small holes a generous radius and large ones a
+  // modest one, keeping the whole pass interactive on a 4096px photo.
+  const WORK_BUDGET = 1.6e8;
+  const wanted = Math.max(radius | 0, Math.sqrt(unknown / Math.PI) * 0.28);
+  const affordable = Math.sqrt(WORK_BUDGET / (4 * unknown));
+  const eps = Math.max(4, Math.min(14, Math.round(Math.min(wanted, affordable))));
 
   // march inward; every popped pixel fills its still-unknown neighbours
   while (heap.size) {
@@ -167,6 +174,72 @@ function inpaint(px, w, h, maskBits, radius) {
       estimate(ni, nj, w, h, flags, T, px, eps);
       flags[n] = BAND;
       heap.push(T[n], n);
+    }
+  }
+
+  smoothFill(px, w, h, maskBits, eps, unknown);
+}
+
+// Telea fills outward from the rim, which leaves a visible ridge where the new
+// pixels meet the old ones and faceting deeper in. A short blur confined to the
+// filled region — feathered so it fades out at the boundary — removes both
+// without touching any original pixel.
+function smoothFill(px, w, h, maskBits, eps, unknown) {
+  // same budget logic: the blur is cheap per pixel but there can be millions
+  const r = Math.max(1, Math.min(4, Math.round(Math.min(eps / 4, Math.sqrt(4e7 / (4 * unknown))))));
+  const N = w * h;
+  // distance from the rim, in steps, capped: used as the blend weight
+  const depth = new Uint8Array(N);
+  let edge = [];
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      const n = j * w + i;
+      if (!maskBits[n]) continue;
+      const rim = (i === 0 || !maskBits[n - 1]) || (i === w - 1 || !maskBits[n + 1])
+               || (j === 0 || !maskBits[n - w]) || (j === h - 1 || !maskBits[n + w]);
+      if (rim) { depth[n] = 1; edge.push(n); }
+    }
+  }
+  const maxDepth = Math.max(2, Math.min(6, Math.round(eps / 3)));
+  for (let d = 1; d < maxDepth && edge.length; d++) {
+    const next = [];
+    for (const n of edge) {
+      const i = n % w, j = (n / w) | 0;
+      for (let k = 0; k < 4; k++) {
+        const ni = i + (k === 0 ? -1 : k === 1 ? 1 : 0);
+        const nj = j + (k === 2 ? -1 : k === 3 ? 1 : 0);
+        if (ni < 0 || ni >= w || nj < 0 || nj >= h) continue;
+        const m = nj * w + ni;
+        if (maskBits[m] && !depth[m]) { depth[m] = d + 1; next.push(m); }
+      }
+    }
+    edge = next;
+  }
+
+  const src = new Float32Array(N * 3);
+  for (let n = 0; n < N; n++) {
+    const p = n * 4;
+    src[n * 3] = px[p]; src[n * 3 + 1] = px[p + 1]; src[n * 3 + 2] = px[p + 2];
+  }
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      const n = j * w + i;
+      if (!maskBits[n]) continue;
+      let sr = 0, sg = 0, sb = 0, c = 0;
+      const jlo = Math.max(0, j - r), jhi = Math.min(h - 1, j + r);
+      const ilo = Math.max(0, i - r), ihi = Math.min(w - 1, i + r);
+      for (let l = jlo; l <= jhi; l++) {
+        for (let k = ilo; k <= ihi; k++) {
+          const m = l * w + k;
+          sr += src[m * 3]; sg += src[m * 3 + 1]; sb += src[m * 3 + 2]; c++;
+        }
+      }
+      // weight 0 at the rim rising to 1 in the interior, so the join stays put
+      const wgt = Math.min(1, (depth[n] || maxDepth) / maxDepth) * 0.85;
+      const p = n * 4;
+      px[p] = px[p] * (1 - wgt) + (sr / c) * wgt;
+      px[p + 1] = px[p + 1] * (1 - wgt) + (sg / c) * wgt;
+      px[p + 2] = px[p + 2] * (1 - wgt) + (sb / c) * wgt;
     }
   }
 }

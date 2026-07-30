@@ -12,7 +12,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  serveRepo, shimCDN, launchBrowser, appDepVersions, PHONE, reporter, REPO,
+  serveRepo, shimCDN, launchBrowser, appDepVersions, vendorFiles, PHONE, reporter, REPO,
 } from './lib/harness.mjs';
 
 const R = reporter('offline suite');
@@ -21,25 +21,18 @@ const ok = (c, n) => R.ok(c, n);
 /* ---------- static: the precache list must match what the app imports ---------- */
 
 const sw = readFileSync(join(REPO, 'sw.js'), 'utf8');
-const v = appDepVersions();
-const wanted = [
-  `https://cdn.jsdelivr.net/npm/fabric@${v.fabric}/dist/index.min.mjs`,
-  `https://cdn.jsdelivr.net/npm/idb-keyval@${v['idb-keyval']}/+esm`,
-];
-for (const url of wanted) {
-  ok(sw.includes(url),
-     `sw.js precaches the exact url the app imports: ${url.replace('https://cdn.jsdelivr.net/npm/', '')} — ` +
-     'module imports on a first visit happen before the worker activates, so ' +
-     'runtime caching alone would never capture them');
+const files = Object.values(vendorFiles());
+const wanted = files.map(f => './' + f);
+for (const f of wanted) {
+  ok(sw.includes(f),
+     `sw.js caches ${f} with the rest of the shell — the canvas engine has to be ` +
+     'there or an offline launch is a dead shell with a live-looking button');
 }
-
-// the precache must not block install or activation on a slow CDN
-ok(/AbortSignal\.timeout/.test(sw), 'the cdn warm-up is time-boxed so it cannot hang activation');
-const activateBlock = sw.slice(sw.indexOf("addEventListener('activate'"), sw.indexOf('async function warmCDN'));
-ok(!/await\s+warmCDN\(\)/.test(activateBlock), 'the cdn warm-up is not awaited during activation');
+ok(!sw.includes('cdn.jsdelivr.net'),
+   'no cdn is on the critical path any more, so offline cannot depend on one being reachable');
 
 // every app module should be in the shell list, or an offline visit misses it
-const shellBlock = sw.slice(sw.indexOf('const SHELL'), sw.indexOf('const CDN_MODULES'));
+const shellBlock = sw.slice(sw.indexOf('const SHELL'), sw.indexOf('const RUNTIME_HOSTS'));
 const modules = ['app', 'bus', 'store', 'fonts', 'editor', 'ui', 'retouch', 'inpaint-worker']
   .map(f => `./js/${f}.js`);
 const missing = modules.filter(m => !shellBlock.includes(m));
@@ -81,7 +74,8 @@ const cached = await pollUntil(async () => {
   const keys = await caches.keys();
   if (!keys.length) return 0;
   const paths = (await (await caches.open(keys[0])).keys()).map(r => new URL(r.url).pathname);
-  const need = ['/js/app.js', '/js/ui.js', '/js/editor.js', '/css/app.css', '/fonts.json'];
+  const need = ['/js/app.js', '/js/ui.js', '/js/editor.js', '/css/app.css', '/fonts.json',
+                '/vendor/fabric-6.9.1.min.mjs'];
   return need.every(n => paths.some(p => p.endsWith(n))) ? paths.length : 0;
 });
 ok(cached > 0, `the whole app shell is cached (${cached} entries)`);
@@ -89,16 +83,50 @@ ok(cached > 0, `the whole app shell is cached (${cached} entries)`);
 // with the network cut, same-origin files must still resolve out of the cache
 await ctx.setOffline(true);
 const offlineFetch = await page.evaluate(async () => {
-  const want = ['./js/app.js', './js/ui.js', './css/app.css', './fonts.json'];
+  const want = ['./js/app.js', './js/ui.js', './css/app.css', './fonts.json',
+                './vendor/fabric-6.9.1.min.mjs'];
   const res = await Promise.all(want.map(u => fetch(u).then(r => r.ok).catch(() => false)));
   return res.every(Boolean);
 });
 ok(offlineFetch, 'app files load from cache with the network offline');
 
-const navOk = await page.reload({ waitUntil: 'domcontentloaded' })
-  .then(async () => (await page.locator('#viewHome').count()) > 0)
-  .catch(() => false);
-ok(navOk, 'the page still serves after an offline reload');
+// #viewHome is hard-coded in index.html, so counting it proves nothing — it is
+// there whether or not a single module ran. Assert the app BOOTED and works.
+await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+await page.waitForTimeout(1500);
+
+const booted = await page.evaluate(() => {
+  const icon = document.querySelector('#touch-icon');
+  // makeTouchIcon() is the last thing boot() does
+  return !!(icon && (icon.getAttribute('href') || '').startsWith('data:image/png'));
+});
+ok(booted, 'the app actually boots offline (boot() ran to completion, not just a cached shell)');
+
+const usable = await page.evaluate(async () => {
+  document.querySelector('#btnNew').click();
+  await new Promise(r => setTimeout(r, 350));
+  const presets = document.querySelectorAll('#sheetBody [data-p]').length;
+  const open = document.querySelector('#sheet').classList.contains('on');
+  if (!open || !presets) return { open, presets, docW: null };
+  document.querySelector('[data-p="ig-post"]').click();
+  await new Promise(r => setTimeout(r, 700));
+  const m = await import('./js/editor.js');
+  return { open, presets, docW: m.ed.docW, hasCanvas: !!m.ed.canvas };
+});
+ok(usable.open && usable.presets === 5 && usable.docW === 1080 && usable.hasCanvas,
+   `and you can start a flyer offline (presets ${usable.presets}, canvas ${usable.docW}px)`);
+
+const engineCached = await page.evaluate(async paths => {
+  const keys = await caches.keys();
+  for (const k of keys) {
+    const c = await caches.open(k);
+    const hits = await Promise.all(paths.map(p => c.match(p).then(Boolean)));
+    if (hits.every(Boolean)) return true;
+  }
+  return false;
+}, wanted);
+ok(engineCached,
+   'the canvas engine is in the cache, so the offline boot is real rather than lucky');
 await ctx.setOffline(false);
 
 await browser.close();

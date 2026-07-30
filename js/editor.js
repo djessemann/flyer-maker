@@ -1,5 +1,5 @@
 // canvas engine: fabric setup, gestures, zoom/pan, undo/redo, autosave, export
-import * as fabric from 'https://cdn.jsdelivr.net/npm/fabric@6.9.1/dist/index.min.mjs';
+import * as fabric from '../vendor/fabric-6.9.1.min.mjs';
 import { emit } from './bus.js';
 import { saveProject, newId } from './store.js';
 import { ensureDocFonts } from './fonts.js';
@@ -22,6 +22,11 @@ export const ed = {
   docW: 1080, docH: 1350, bgRect: null,
   undoStack: [], redoStack: [], restoring: false,
   exportScale: 2, open: false,
+  // set while a long operation owns the document (an erase pass). undo/redo
+  // refuse to run: rewinding mid-erase used to walk past the photo's import,
+  // then the finishing erase snapshotted the empty canvas and autosave made it
+  // permanent — the flyer came back blank.
+  busy: false,
 };
 
 let dirtyTimer = null, snapTimer = null, host = null;
@@ -60,8 +65,8 @@ export function initEditor() {
   canvas.on('mouse:down', opt => {
     if (!opt.target) { canvas.discardActiveObject(); canvas.requestRenderAll(); }
   });
-  canvas.on('selection:created', () => emit('selection'));
-  canvas.on('selection:updated', () => emit('selection'));
+  canvas.on('selection:created', e => { (e.selected || []).forEach(tuneHandles); emit('selection'); });
+  canvas.on('selection:updated', e => { (e.selected || []).forEach(tuneHandles); emit('selection'); });
   canvas.on('selection:cleared', () => emit('selection'));
   canvas.on('object:modified', e => { bakeScale(e.target); markDirty(true); emit('selection'); });
   canvas.on('object:added', e => { if (!ed.restoring) styleControls(e.target); });
@@ -83,6 +88,27 @@ function styleControls(obj) {
   obj.controls.mtr.y = 0.5;
   obj.controls.mtr.offsetY = 36;
   obj.controls.mtr.withConnection = true;
+  tuneHandles(obj);
+}
+
+// A 44px touch target is right for a big layer and a trap for a small one: at
+// fit zoom a fresh text layer is ~34px tall on screen, so its own corner
+// handles covered it completely and a drag meant to move it scaled it into an
+// illegible sliver instead. Keep handles proportional to what's on screen.
+function tuneHandles(obj) {
+  if (!obj || obj.pKind === 'bg') return;
+  const z = ed.canvas ? ed.canvas.getZoom() : 1;
+  const r = obj.getBoundingRect();
+  const screenMin = Math.min(r.width, r.height) * z;
+  obj.set({
+    touchCornerSize: Math.max(10, Math.min(44, Math.floor(screenMin / 3))),
+    cornerSize: Math.max(6, Math.min(11, Math.floor(screenMin / 6))),
+  });
+}
+
+export function tuneAllHandles() {
+  if (!ed.canvas) return;
+  ed.canvas.getObjects().forEach(tuneHandles);
 }
 
 /* ---------- doc lifecycle ---------- */
@@ -130,7 +156,7 @@ export function closeDoc() {
 
 function makeBg(fill) {
   return new fabric.Rect({
-    left: 0, top: 0, width: ed.docW, height: ed.docH, fill,
+    left: -1, top: -1, width: ed.docW + 2, height: ed.docH + 2, fill,
     selectable: false, evented: false, hoverCursor: 'default',
     pKind: 'bg', pName: 'background', pLocked: true,
     shadow: new fabric.Shadow({ color: 'rgba(0,0,0,0.18)', blur: 40, offsetY: 14 }),
@@ -147,10 +173,19 @@ function afterRestore() {
     ed.bgRect.set('shadow', new fabric.Shadow({ color: 'rgba(0,0,0,0.18)', blur: 40, offsetY: 14 }));
   }
   ed.bgRect.set({ selectable: false, evented: false });
+  sizeBg();
   canvas.sendObjectToBack(ed.bgRect);
   canvas.getObjects().forEach(o => {
     styleControls(o);
     if (o.pLocked && o.pKind !== 'bg') o.set({ selectable: false, evented: false });
+  });
+  // Text laid out during loadFromJSON is measured against whatever face was
+  // available at that instant, and fabric caches those metrics. Reopening a
+  // flyer therefore came back with the headline re-wrapped onto one overflowing
+  // line. Drop the cache and re-measure now that the real fonts are loaded.
+  try { fabric.cache.clearFontCache(); } catch {}
+  canvas.getObjects().forEach(o => {
+    if (o.pKind === 'text' && o.initDimensions) { o.initDimensions(); o.setCoords(); }
   });
   ed.restoring = false;
   canvas.requestRenderAll();
@@ -198,7 +233,41 @@ export async function flushSave() {
 
 /* ---------- undo / redo ---------- */
 
-const snapshotState = () => ({ fabric: ed.canvas.toObject(PROPS), w: ed.docW, h: ed.docH });
+// Undo snapshots used to embed every photo as a base64 data URL — a 4096px PNG
+// is ~23MB of string, copied into all 40 history entries. Store each distinct
+// source once and put a token in the snapshot instead.
+const imageStore = new Map();   // token -> data url
+let imageToken = 0;
+
+function snapshotState() {
+  const doc = ed.canvas.toObject(PROPS);
+  for (const o of doc.objects || []) {
+    if (o.type === 'Image' && typeof o.src === 'string' && o.src.length > 4096) {
+      let token = null;
+      for (const [k, v] of imageStore) if (v === o.src) { token = k; break; }
+      if (!token) { token = `pasteup:img:${++imageToken}`; imageStore.set(token, o.src); }
+      o.src = token;
+    }
+  }
+  return { fabric: doc, w: ed.docW, h: ed.docH };
+}
+
+function rehydrate(state) {
+  const doc = structuredClone(state.fabric);
+  for (const o of doc.objects || []) {
+    if (typeof o.src === 'string' && imageStore.has(o.src)) o.src = imageStore.get(o.src);
+  }
+  return doc;
+}
+
+// keep only what the history still refers to
+function pruneImageStore() {
+  const live = new Set();
+  for (const s of [...ed.undoStack, ...ed.redoStack]) {
+    for (const o of s.fabric.objects || []) if (imageStore.has(o.src)) live.add(o.src);
+  }
+  for (const k of [...imageStore.keys()]) if (!live.has(k)) imageStore.delete(k);
+}
 
 export function pushSnapshot() {
   if (ed.restoring) return;
@@ -206,6 +275,7 @@ export function pushSnapshot() {
   ed.undoStack.push(snapshotState());
   if (ed.undoStack.length > 40) ed.undoStack.shift();
   ed.redoStack = [];
+  pruneImageStore();
   emit('history');
 }
 
@@ -218,6 +288,7 @@ export const canUndo = () => ed.undoStack.length > 1;
 export const canRedo = () => ed.redoStack.length > 0;
 
 export async function undo() {
+  if (ed.busy) { emit('toast', 'hang on — finishing the last change'); return; }
   if (!canUndo()) return;
   clearTimeout(snapTimer);
   ed.redoStack.push(ed.undoStack.pop());
@@ -225,6 +296,7 @@ export async function undo() {
 }
 
 export async function redo() {
+  if (ed.busy) { emit('toast', 'hang on — finishing the last change'); return; }
   if (!canRedo()) return;
   const s = ed.redoStack.pop();
   ed.undoStack.push(s);
@@ -235,9 +307,13 @@ async function restore(s) {
   ed.restoring = true;
   const sizeChanged = s.w !== ed.docW || s.h !== ed.docH;
   ed.docW = s.w; ed.docH = s.h;
-  await ed.canvas.loadFromJSON(s.fabric);
+  await ed.canvas.loadFromJSON(rehydrate(s));
   afterRestore();
   if (sizeChanged) fit();
+  // every object on the canvas is a new instance now: anything holding a
+  // reference to the old one (an open sheet, an inline slider, erase mode) is
+  // pointing at a detached object and must let go.
+  emit('doc:restored');
   emit('layers'); emit('selection'); emit('history'); emit('doc:change');
   markDirty();
 }
@@ -275,6 +351,14 @@ export function cycleZoom() {
 function wireGestures(canvas) {
   const el = canvas.upperCanvasEl;
   let g = null;
+  let beforeTouch = null;   // selection as it stood before this touch sequence
+
+  // captured before fabric sees the event, so we know what was selected when
+  // the first finger landed — a two-finger pan used to leave you holding
+  // whatever happened to be under your fingers
+  el.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) beforeTouch = canvas.getActiveObject() || null;
+  }, { capture: true, passive: true });
 
   const pts = tl => [...tl].map(t => ({ x: t.clientX, y: t.clientY }));
   const mid = p => ({ x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 });
@@ -289,6 +373,12 @@ function wireGestures(canvas) {
       e.preventDefault();
       canvas._currentTransform = null;
       canvas.skipTargetFind = true;
+      // put the selection back the way the user left it before they pinched
+      if (canvas.getActiveObject() !== beforeTouch) {
+        if (beforeTouch && canvas.getObjects().includes(beforeTouch)) canvas.setActiveObject(beforeTouch);
+        else canvas.discardActiveObject();
+        canvas.requestRenderAll();
+      }
       const p = pts(e.touches);
       g = { d0: dist(p) || 1, m0: local(mid(p)), vpt: [...canvas.viewportTransform] };
     }
@@ -349,10 +439,11 @@ export function layerName(o) {
 }
 
 // place near the middle of the artboard, nudged down as the stack grows
+// cascade far enough that a new layer never lands hidden under the last one
 function spot() {
   const n = ed.canvas.getObjects().filter(o => o.pKind !== 'bg').length;
-  const off = (n % 6) * Math.round(ed.docH * 0.035);
-  return { x: ed.docW / 2, y: ed.docH / 2 + off - ed.docH * 0.09 };
+  const off = (n % 5) * Math.round(ed.docH * 0.11);
+  return { x: ed.docW / 2, y: ed.docH * 0.28 + off };
 }
 
 export function addText() {
@@ -562,13 +653,48 @@ function bakeScale(o) {
 /* ---------- canvas settings ---------- */
 
 export function resizeDoc(w, h) {
+  const oldW = ed.docW, oldH = ed.docH;
   ed.docW = clamp(Math.round(w) || ed.docW, 100, 6000);
   ed.docH = clamp(Math.round(h) || ed.docH, 100, 6000);
-  ed.bgRect.set({ left: 0, top: 0, width: ed.docW, height: ed.docH });
-  ed.bgRect.setCoords();
+  if (oldW && oldH && (ed.docW !== oldW || ed.docH !== oldH)) reflowLayers(oldW, oldH);
+  sizeBg();
   fit();
   pushSnapshot(); markDirty();
   emit('doc:change');
+}
+
+// Changing the canvas used to leave every layer at its old coordinates, so
+// switching a poster to a square silently pushed most of the flyer outside the
+// frame and the export came back mostly blank. Carry the layout across instead:
+// each layer keeps its relative position and is scaled uniformly, so nothing
+// distorts and nothing falls off the edge.
+function reflowLayers(oldW, oldH) {
+  const s = Math.min(ed.docW / oldW, ed.docH / oldH);
+  for (const o of ed.canvas.getObjects()) {
+    if (o.pKind === 'bg') continue;
+    const c = o.getCenterPoint();
+    if (o.pKind === 'text') {
+      o.set({ fontSize: Math.max(4, o.fontSize * s), width: Math.max(20, o.width * s) });
+      if (o.initDimensions) o.initDimensions();
+    } else if (o.pKind === 'rect' || o.pKind === 'rounded') {
+      o.set({ width: o.width * s, height: o.height * s, rx: (o.rx || 0) * s, ry: (o.ry || 0) * s });
+    } else if (o.pKind === 'ellipse') {
+      o.set({ rx: o.rx * s, ry: o.ry * s });
+    } else {
+      o.set({ scaleX: o.scaleX * s, scaleY: o.scaleY * s });
+    }
+    if (o.strokeWidth) o.set('strokeWidth', o.strokeWidth * s);
+    o.setPositionByOrigin(
+      new fabric.Point(c.x / oldW * ed.docW, c.y / oldH * ed.docH), 'center', 'center');
+    o.setCoords();
+  }
+}
+
+// a hair of bleed so the exported edge is fully opaque rather than antialiased
+function sizeBg() {
+  if (!ed.bgRect) return;
+  ed.bgRect.set({ left: -1, top: -1, width: ed.docW + 2, height: ed.docH + 2 });
+  ed.bgRect.setCoords();
 }
 
 export function setBg(color) {
@@ -621,7 +747,9 @@ export async function renderPNGBlob(scale) {
   }));
 }
 
-export const exportFilename = scale => `${slug()}-${ed.docW * scale}x${ed.docH * scale}.png`;
+// doc §8: name-1080x1350@2x.png — canvas size plus the scale, not the product
+export const exportFilename = scale =>
+  `${slug()}-${ed.docW}x${ed.docH}${scale > 1 ? '@' + scale + 'x' : ''}.png`;
 export const projectFilename = () => `${slug()}.pasteup.json`;
 export const projectBlob = () =>
   new Blob([JSON.stringify(serializeDoc())], { type: 'application/json' });
