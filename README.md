@@ -14,11 +14,10 @@ a flyer editor for the browser. add photos, scrub out what doesn't belong, set t
 select a layer and the bar under the canvas becomes that layer's controls —
 tap `color`, `font`, `size` and you get one sheet doing one job. with nothing
 selected the bar is `text · photo · shape · layers · canvas`. select a photo
-and you get `crop · adjust · replace · move`: drag a rectangle to keep part of a
-picture, flip and rotate it, swap it out, or place it to the pixel.
-
-there is no object removal. there was, and it is documented in
-[`docs/ui-revision.md`](docs/ui-revision.md) why it was taken out.
+and you get `crop · adjust · replace · erase · move`: drag a rectangle to keep
+part of a picture, flip and rotate it, swap it out, place it to the pixel — or
+paint over something you want gone and have the photo's own background copied
+into its place.
 
 ## docs
 

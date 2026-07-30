@@ -1,5 +1,5 @@
 // offline: cache the app shell up front, runtime-cache the canvas lib and fonts
-const VERSION = 'pasteup-v6';
+const VERSION = 'pasteup-v7';
 const SHELL = [
   './',
   './index.html',
@@ -11,6 +11,8 @@ const SHELL = [
   './js/editor.js',
   './js/ui.js',
   './js/crop.js',
+  './js/retouch.js',
+  './js/inpaint-worker.js',
   './vendor/fabric-6.9.1.min.mjs',
   './vendor/idb-keyval-6.3.0.mjs',
   './fonts.json',

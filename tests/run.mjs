@@ -5,7 +5,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const suites = ['fonts.test.mjs', 'offline.test.mjs', 'mobile.test.mjs'];
+const suites = ['inpaint.test.mjs', 'fonts.test.mjs', 'offline.test.mjs', 'mobile.test.mjs'];
 const results = [];
 
 for (const s of suites) {
