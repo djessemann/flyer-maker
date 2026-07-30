@@ -5,7 +5,7 @@ import { initFonts } from './fonts.js';
 import {
   ed, initEditor, newDoc, openDoc, closeDoc, flushSave,
   undo, redo, canUndo, canRedo, cycleZoom, zoomLevel, nudge, deleteObject,
-  PRESETS, markDirty,
+  PRESETS, markDirty, tuneAllHandles,
 } from './editor.js';
 import { initUI, closeSheet, showToast, sheetExport } from './ui.js';
 import { initRetouch } from './retouch.js';
@@ -184,7 +184,10 @@ function wireTopbar() {
     $('#btnUndo').classList.toggle('dim', !canUndo());
     $('#btnRedo').classList.toggle('dim', !canRedo());
   });
-  on('zoom', () => { $('#btnZoom').textContent = Math.round(zoomLevel() * 100) + '%'; });
+  on('zoom', () => {
+    $('#btnZoom').textContent = Math.round(zoomLevel() * 100) + '%';
+    tuneAllHandles();
+  });
   on('doc:open', () => {
     $('#docTitle').textContent = ed.name;
     $('#btnUndo').classList.add('dim');
@@ -197,8 +200,14 @@ function wireTopbar() {
 function wireKeyboard() {
   addEventListener('keydown', e => {
     if (!ed.open) return;
+    // erase mode owns the screen and has its own controls
+    if (document.querySelector('#retouch').classList.contains('on')) return;
+    // only text entry should swallow shortcuts — a focused slider used to kill
+    // undo entirely, which is exactly when you want it
     const t = e.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+    const typing = t && (t.tagName === 'TEXTAREA'
+      || (t.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button'].includes(t.type)));
+    if (typing) return;
     const o = ed.canvas.getActiveObject();
     if (o && o.isEditing) return;
 

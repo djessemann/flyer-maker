@@ -35,13 +35,14 @@ svg{display:block;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:
   border-bottom:1px solid var(--workspace);display:flex;align-items:center;gap:4px;flex-shrink:0}
 .app-name{font-size:16px;letter-spacing:.04em;font-weight:500;padding-left:6px}
 .doc-title{font-size:14.5px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  max-width:42vw;padding:8px 4px}
+  max-width:42vw;padding:0 6px;min-height:44px;display:flex;align-items:center}
 .doc-title-input{font-size:14.5px;letter-spacing:.02em;border:none;background:none;outline:none;
   border-bottom:1px solid var(--mut2);max-width:42vw;padding:6px 2px}
 .icon-btn{width:44px;height:44px;display:flex;align-items:center;justify-content:center;color:var(--ink);flex-shrink:0}
 .icon-btn.dim{color:var(--mut2)}
-.pill{background:var(--ink);color:var(--paper);border-radius:20px;padding:10px 18px;
-  font-size:13px;letter-spacing:.04em;flex-shrink:0;text-align:center}
+.pill{background:var(--ink);color:var(--paper);border-radius:20px;padding:12px 18px;
+  font-size:13px;letter-spacing:.04em;flex-shrink:0;text-align:center;min-height:44px;
+  display:inline-flex;align-items:center;justify-content:center}
 .pill.ghost{background:none;color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
 .pill.danger{background:var(--danger)}
 
@@ -51,8 +52,10 @@ svg{display:block;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:
 .home-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:16px;max-width:1100px;margin:0 auto}
 .proj{display:flex;flex-direction:column;gap:8px}
 .proj:active{opacity:.4}
-.proj .pthumb{width:100%;aspect-ratio:4/5;background:#fff;border-radius:1px;
-  box-shadow:0 0 0 1px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.08);background-size:cover;background-position:center top}
+.proj .pthumb{width:100%;aspect-ratio:4/5;background:var(--workspace);border-radius:1px;
+  box-shadow:0 0 0 1px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.08);
+  /* contain, not cover: a story-shaped flyer was being cropped off at the card */
+  background-size:contain;background-repeat:no-repeat;background-position:center}
 .proj .pname{font-size:13px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .proj .pmeta{font-size:11px;letter-spacing:.04em;color:var(--mut2)}
 .home-empty{max-width:1100px;margin:60px auto;text-align:center;font-size:14px}
@@ -63,7 +66,8 @@ svg{display:block;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:
 .ws .canvas-container{position:absolute !important;inset:0}
 .zoom-pill{position:absolute;left:12px;bottom:12px;z-index:3;background:var(--paper);
   box-shadow:0 3px 14px rgba(0,0,0,.10),inset 0 0 0 1px var(--workspace);
-  border-radius:20px;padding:8px 14px;font-size:12px;letter-spacing:.04em;color:var(--mut1)}
+  border-radius:22px;padding:0 16px;min-height:44px;min-width:64px;font-size:12px;
+  letter-spacing:.04em;color:var(--mut1);display:flex;align-items:center;justify-content:center}
 
 /* ---------- contextual action bar ---------- */
 .actionbar{flex-shrink:0;background:var(--paper);border-top:1px solid var(--workspace);
@@ -90,7 +94,7 @@ svg{display:block;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:
 .actionbar.inline-mode{overflow:visible}
 .inline{display:flex;align-items:center;gap:12px;width:100%;height:64px;padding:0 8px}
 .inline-l{font-size:11px;letter-spacing:.06em;color:var(--mut2);flex-shrink:0}
-.inline input[type=range]{flex:1;min-width:0}
+.inline input[type=range]{flex:1;min-width:0;height:44px}
 .inline-v{font-size:13px;min-width:50px;text-align:right;flex-shrink:0;letter-spacing:.02em}
 .inline-done{font-size:12px;letter-spacing:.04em;padding:0 16px;height:40px;border-radius:20px;
   box-shadow:inset 0 0 0 1px var(--ink);flex-shrink:0;display:flex;align-items:center}
@@ -98,21 +102,21 @@ svg{display:block;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:
 /* ---------- overlay + sheet (body level, above every view) ---------- */
 /* stops short of the action bar, so the bar stays lit and tappable while a
    sheet is open — you can hop straight from colour to font without closing */
-.overlay{position:fixed;top:0;left:0;right:0;bottom:var(--barh);background:var(--sel);
-  opacity:0;pointer-events:none;transition:opacity .16s ease;z-index:60}
+.overlay{position:fixed;top:calc(52px + var(--sat));left:0;right:0;bottom:var(--barh);
+  background:var(--sel);opacity:0;pointer-events:none;transition:opacity .16s ease;z-index:60}
 .overlay.on{opacity:1;pointer-events:auto}
 
 /* capped short on purpose: you must be able to see the flyer above the sheet */
 .sheet{position:fixed;left:0;right:0;bottom:var(--barh);z-index:70;background:var(--paper);
   border-radius:20px 20px 0 0;display:flex;flex-direction:column;
-  max-height:min(56dvh,470px);transform:translateY(130%);pointer-events:none;
+  max-height:min(56dvh,470px);transform:translateY(calc(100% + var(--barh) + 24px));pointer-events:none;
   transition:transform .28s cubic-bezier(.32,1.1,.58,1);
   box-shadow:0 -8px 44px rgba(0,0,0,.16)}
 .sheet.tall{max-height:min(72dvh,620px)}
 .sheet.on{transform:translateY(0);pointer-events:auto}
 @media (min-width:720px){
   /* float clear of the action bar so both stay usable at once */
-  .sheet{left:50%;right:auto;width:560px;transform:translate(-50%,120%);border-radius:16px;
+  .sheet{left:50%;right:auto;width:560px;transform:translate(-50%,calc(120% + 120px));border-radius:16px;
     bottom:calc(78px + var(--sab));max-height:min(60dvh,560px);padding-bottom:0}
   .sheet.tall{max-height:min(72dvh,660px)}
   .sheet.on{transform:translate(-50%,0)}
@@ -120,8 +124,8 @@ svg{display:block;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:
 .sheet-grab{width:36px;height:4px;border-radius:2px;background:var(--workspace);margin:8px auto 0;flex-shrink:0}
 .sheet-head{display:flex;align-items:center;gap:2px;padding:6px 8px 8px;flex-shrink:0}
 .sheet-title{font-size:13.5px;letter-spacing:.05em;padding-left:8px}
-.sheet-back{width:36px;height:36px}
-.sheet-head .icon-btn{width:36px;height:36px;color:var(--mut1)}
+.sheet-back{width:44px;height:44px}
+.sheet-head .icon-btn{width:44px;height:44px;color:var(--mut1)}
 .sheet-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:2px 18px 22px;min-height:0}
 
 /* ---------- sheet building blocks ---------- */
@@ -205,7 +209,7 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
 .fsect{padding:12px 12px 5px;font-size:10.5px;letter-spacing:.08em;color:var(--mut2)}
 .floadrow{display:flex;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--workspace)}
 .floadrow input{flex:1;padding:13px 12px;box-shadow:inset 0 0 0 1px var(--workspace);border-radius:2px;
-  font-size:12.5px;border:none;background:none;outline:none;min-width:0}
+  font-size:12.5px;border:none;background:none;outline:none;min-width:0;min-height:44px}
 
 /* ---------- layers ---------- */
 .lrow{display:flex;align-items:center;gap:11px;padding:9px 8px;border-radius:2px;position:relative;
@@ -260,6 +264,7 @@ input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;bac
   display:flex;align-items:center;gap:14px;flex-wrap:wrap;
   padding:12px 16px calc(12px + var(--sab))}
 .rt-brush{display:flex;align-items:center;gap:12px;flex:1 1 240px;min-width:0}
+.rt-brush #rtBrushVal{min-width:52px;text-align:right}
 .rt-brush input[type=range]{flex:1}
 .rt-dot{border-radius:50%;background:rgba(204,51,51,.45);flex-shrink:0;
   box-shadow:0 0 0 1px rgba(204,51,51,.7)}

@@ -202,3 +202,118 @@ real user gesture, and the `await` around rendering spends the original one.
   renders a thumbnail on every edit, and discarding would deselect the user's
   layer roughly once a second. Fabric sets `skipControlsDrawing` during export,
   so handles stay out of the output regardless; asserted by test.
+
+---
+
+# round 4 — what four independent reviewers found
+
+Four Claude instances that had not built the app were given `qa-charter.md`, the
+design doc, and real user goals — deliberately *not* the test suite. Between them
+they found one data-loss blocker, seven majors, and proved the suite was close to
+worthless. Everything below was reproduced before it was fixed.
+
+## the suite was passing while the app was broken
+
+One reviewer copied the repo, injected six user-visible bugs, and ran the suite.
+**It stayed 72/72 green for all six**: layer names and lock state dropped on save,
+a dead visibility toggle, "fit to flyer" shrinking photos to 10%, centre-across
+shoving layers off the artboard, load-by-name ignoring the typed family, and the
+selection panned 300px off-screen — the last of which still printed
+`sheets cover 0%`, because zero overlap is equally true of an object nobody can see.
+
+Three assertions were literally `ok(true, …)`. One used `waitForFunction` with an
+async predicate, which resolves on the returned Promise rather than its value — it
+had been green and meaningless since the day it was written.
+
+The suite is now 123 checks across four files, and every one of those six injected
+bugs fails at least one of them.
+
+## data loss
+
+- **Undoing while an erase was in flight destroyed the photo.** History walked
+  past the import, the finishing pass snapshotted an empty canvas, redo was wiped
+  and autosave made it permanent. `ed.busy` now blocks undo/redo for the duration,
+  and an erase that finds its layer detached refuses to write.
+- **Erase after an undo lied.** It reported success while writing to an object no
+  longer on the canvas, and the export still contained what you'd removed. Erase
+  mode now closes when the document is rewound underneath it.
+- **Reopening re-wrapped text.** Layout was measured against whatever face existed
+  during `loadFromJSON`, and fabric cached those metrics, so a two-line headline
+  came back as one overflowing line. The cache is dropped and text re-measured
+  after fonts resolve.
+- **Autosave fidelity was asserted by layer *type* only.** Now a full
+  property-by-property snapshot across save → reload, naming the first key that
+  differs, plus a pixel check that a restored photo still has pixels.
+
+## the layout could fall off the canvas
+
+Changing canvas size left every layer at its old coordinates: poster → square left
+the photo 21% inside the frame and the export two-thirds blank. Layers now keep
+their relative position and scale uniformly, asserted at ≥90% inside across both
+directions.
+
+## moving a layer scaled it instead
+
+`touchCornerSize: 44` is right for a big layer and a trap for a small one — at fit
+zoom a fresh text layer is 34px tall on screen, so its own handles covered it
+entirely and a drag crushed a headline to an 8px sliver. Handle hit areas are now
+proportional to the layer's on-screen size.
+
+## erase, measured honestly
+
+Ground-truth measurements, small object on a smooth background: **1.26/255 mean
+error**. That case is genuinely excellent. Beyond it, it degraded — a large hole
+left a hard seam (a 20/255 step at the rim where the truth is 1) and faceting.
+
+A feathered blur confined to the filled region, plus a sampling radius chosen
+against a work budget, cuts the seam to roughly a third (11 → 4 on a 200px hole,
+14 → 6 on 300px) while keeping the pass interactive: the worst large-region case
+went 930ms → 1397ms rather than the 10× a naive bigger radius cost.
+
+**The doc's escape hatch is false and has been removed from the UI copy.** §7 says
+that if the fill smears, paint again with a bigger brush. Measured: that makes it
+*worse* — 27.0 → 28.5 mean error over 3.9× the area. On texture this algorithm
+smears, and no amount of re-painting fixes it; the honest guidance is that erase
+is for small things against plain backgrounds.
+
+Also: the brush is now a share of the image rather than screen pixels (on a 4096px
+photo the smallest brush painted a 116px stroke, so fine masking was impossible),
+undo inside erase mode reverts an applied pass, and results are handed back as
+lossless PNG so repeated passes stop compounding JPEG artefacts.
+
+## offline was never real
+
+The assertion counted `#viewHome`, which is hard-coded in `index.html` and present
+whether or not a single module ran. After an offline reload the app was a dead
+shell: empty project list, "new flyer" doing nothing, the canvas engine not in the
+cache at all — because module imports on a first visit happen before the service
+worker activates.
+
+Precaching the CDN URLs made the promise depend on jsDelivr being reachable at
+exactly the right moment, which no test could prove. **The two libraries are now
+vendored in `vendor/`**, so they are ordinary shell files. Offline is asserted by
+booting the app with the network cut and starting a flyer. This also closes a
+testing blind spot: the suite used to answer those imports with local copies, so
+it exercised a slightly different build than users got.
+
+## smaller repairs
+
+- ⌘Z died once focus was in a slider — every `<input>` was skipped, not just text.
+- Deleting a layer left its sheet open, silently editing nothing.
+- Layer rename was unreachable by touch (a finger never sends `dblclick`); there is
+  a rename button on each row now.
+- Closing the canvas sheet undid the resize re-fit, so the zoom readout disagreed
+  with what was drawn.
+- 4 of 18 palette swatches applied a drifted hex via an HSV round-trip, so they
+  never read as selected and each tap added a near-duplicate.
+- A two-finger pan grabbed whatever was under your fingers; the pre-pinch
+  selection is restored.
+- The dimming overlay covered the top bar, so undo needed two taps.
+- A closed sheet peeked 38px onto the home screen.
+- The home card cropped story flyers (`cover` → `contain`).
+- Exports had a 2px translucent border; the background now bleeds 1px.
+- Six controls were below the doc's own 44px minimum.
+- Undo snapshots embedded every photo as base64 — a 4096px PNG is ~23MB of string
+  copied into all 40 entries. Sources are stored once and referenced by token.
+- The export filename now matches doc §8 (`name-WxH@Nx.png`) instead of folding
+  the scale into the dimensions.

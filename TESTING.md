@@ -5,7 +5,7 @@ The browser items below are covered by an automated pass driven through a
 real targets rather than calling functions. Everything marked **hardware** still
 needs a real iPad/iPhone.
 
-## verified on a phone-sized touch viewport — 68 checks, all passing
+## verified — 123 checks across four suites, all passing
 
 **the interface**
 - [x] sheets receive taps (asserted via `elementFromPoint`) — the v1 regression
@@ -60,11 +60,21 @@ needs a real iPad/iPhone.
 - [x] **the exported pixels are the flyer**: red/blue half-and-half test doc comes
       back red corner-to-corner on the left, blue on the right, no blank margin
 - [x] exporting never drops your selection, and no handles are baked into the png
-- [x] home-screen thumbnails show the whole flyer (same crop bug)
+- [x] home-screen thumbnails show the whole flyer, and the card no longer crops it
+- [x] text produces ink in the png; hidden layers are excluded; opacity is honoured
+- [x] 2x and 3x exports have correct **content**, not merely correct size
+- [x] export scale caps correctly on a tabloid; an oversized canvas clamps to 6000px
+- [x] the erase fill matches its surroundings to within 12/255 and is fully opaque
 - [x] saved file carries a real png signature on disk
 - [x] project file saves; the photo picker actually opens
 - [x] autosave → reload → project listed → reopen with every layer intact
-- [x] undo / redo, keyboard shortcuts, arrow-key nudge
+- [x] undo / redo restores real values; ⌘Z survives a focused slider
+- [x] arrow nudge is exactly 1px, shift+arrow exactly 10px
+- [x] rename by tap (a finger never fires `dblclick`) and it persists
+- [x] layers stay inside the frame when the canvas size changes
+- [x] handles stay proportional so dragging a small layer moves rather than scales it
+- [x] undo refuses to run mid-erase; an undo dismisses controls bound to old objects
+- [x] a project file imports back intact; a foreign json file is refused
 - [x] no page errors across the whole run
 
 ## hardware — real iPad / iPhone pass still needed
@@ -96,17 +106,19 @@ Three suites, 87 checks:
 | suite | what it covers |
 |---|---|
 | `tests/inpaint.test.mjs` | the object-removal maths against ground truth, no browser |
-| `tests/offline.test.mjs` | service worker registration, shell caching, offline reload |
+| `tests/fonts.test.mjs` | load-any-google-font, **including the not-found path** |
+| `tests/offline.test.mjs` | service worker, shell caching, and that the app really boots offline |
 | `tests/mobile.test.mjs` | the whole app on a 393×800 touch viewport |
 
 `npm run audit` is not pass/fail — it prints the interaction costs and geometry
 that `docs/ui-revision.md` makes claims about, so those claims can be re-measured
 rather than trusted.
 
-The suites serve the repo over http and answer the app's two CDN imports with the
-same **pinned** versions out of `node_modules`, so they run with no network. If the
-import URLs in `js/` and the pins in `package.json` ever drift apart, the mobile
-suite fails on the first assertion rather than quietly testing a build nobody ships.
+The suites serve the repo over http and run **exactly what ships** — the canvas
+engine is vendored (see `vendor/README.md`), so there is no stand-in for it any
+more. Only Google Fonts is substituted, and `tests/fonts.test.mjs` deliberately
+runs one context where it *fails*, because a shim that makes every font succeed
+made every failure path in the app unreachable.
 
 `tests/mobile.test.mjs` blocks service workers on purpose — an active worker makes
 its own fetches, which route interception cannot reach, so the CDN shims would be

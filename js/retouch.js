@@ -1,18 +1,24 @@
 // erase-object mode: paint over what you want gone, telea inpaint fills it in.
 // runs in a worker with no external dependency, so it works on first tap.
 import { on, emit } from './bus.js';
-import { swapImageSource } from './editor.js';
+import { ed, swapImageSource } from './editor.js';
 import { showToast } from './ui.js';
 
 const $ = s => document.querySelector(s);
-const HINT = 'paint over what you want gone, then tap “erase it”';
+const HINT = 'paint over what you want gone, then tap “erase it”. works best on small things against plain backgrounds.';
 
 let worker = null, ready = null;
 let obj = null;          // fabric image being worked on
 let native = null;       // full-res pixels
 let maskC = null;        // full-res mask
 let history = [];        // mask undo stack
-let fitScale = 1, brush = 48, mode = 'paint', busy = false;
+let pixelHistory = [];   // full-res snapshots, one per applied erase
+let fitScale = 1, brushPct = 12, mode = 'paint', busy = false;
+
+// brush size as a share of the photo's short side rather than screen pixels:
+// on a 4096px photo fit scale is ~0.09, so a 10px screen brush painted a
+// 116px-wide stroke and fine masking was impossible
+const brushImagePx = () => Math.max(2, Math.round(Math.min(native.width, native.height) * brushPct / 100));
 
 function ensureWorker() {
   if (ready) return ready;
@@ -37,13 +43,20 @@ function ensureWorker() {
 
 export function initRetouch() {
   on('retouch:open', open);
+  // an undo replaces every object; the image we were editing no longer exists
+  on('doc:restored', () => {
+    if ($('#retouch').classList.contains('on')) {
+      close();
+      showToast('closed erase — the flyer was undone underneath it');
+    }
+  });
   $('#rtCancel').addEventListener('click', close);
   $('#rtClear').addEventListener('click', () => { snapshot(); clearMask(); });
   $('#rtUndo').addEventListener('click', undoMask);
   $('#rtGo').addEventListener('click', run);
 
   const size = $('#rtSize');
-  size.addEventListener('input', () => { brush = +size.value; drawDot(); });
+  size.addEventListener('input', () => { brushPct = +size.value / 10; drawDot(); });
   $('#rtMode').addEventListener('click', e => {
     const b = e.target.closest('[data-m]');
     if (!b) return;
@@ -56,11 +69,15 @@ export function initRetouch() {
   addEventListener('resize', () => { if ($('#retouch').classList.contains('on')) layout(); });
 }
 
+// the dot previews the brush at its real size on screen
 function drawDot() {
   const d = $('#rtDot');
-  const s = Math.max(10, Math.min(38, brush * 0.4));
+  const px = native ? brushImagePx() * fitScale : brushPct * 3;
+  const s = Math.max(6, Math.min(40, px));
   d.style.width = s + 'px';
   d.style.height = s + 'px';
+  const label = $('#rtBrushVal');
+  if (label && native) label.textContent = brushImagePx() + 'px';
 }
 
 function open(image) {
@@ -77,11 +94,13 @@ function open(image) {
   maskC.width = native.width;
   maskC.height = native.height;
   history = [];
+  pixelHistory = [];
 
   $('#retouch').classList.add('on');
   $('#rtHint').textContent = HINT;
   $('#rtGo').disabled = false;
   layout();
+  drawDot();
   ensureWorker().catch(err => showToast('erase engine problem: ' + err.message));
 }
 
@@ -115,13 +134,33 @@ function snapshot() {
   if (history.length > 20) history.shift();
 }
 
-function undoMask() {
+// one undo button for both kinds of change: strokes first, then whole erases.
+// "cancel" used to leave an applied erase in place with no way back from here.
+async function undoMask() {
+  if (busy) return;
   const prev = history.pop();
-  if (!prev) { showToast('nothing to undo'); return; }
-  const ctx = maskC.getContext('2d');
-  ctx.clearRect(0, 0, maskC.width, maskC.height);
-  ctx.drawImage(prev, 0, 0);
-  redrawMask();
+  if (prev) {
+    const ctx = maskC.getContext('2d');
+    ctx.clearRect(0, 0, maskC.width, maskC.height);
+    ctx.drawImage(prev, 0, 0);
+    redrawMask();
+    return;
+  }
+  const pixels = pixelHistory.pop();
+  if (!pixels) { showToast('nothing to undo'); return; }
+  native.getContext('2d').putImageData(pixels, 0, 0);
+  $('#rtImg').getContext('2d').drawImage(native, 0, 0);
+  clearMask();
+  await pushToLayer();
+  $('#rtHint').textContent = HINT;
+  showToast('erase undone');
+}
+
+async function pushToLayer() {
+  if (!obj) return;
+  // always hand back a lossless png: re-encoding jpeg on every pass compounded
+  // its own artefacts across repeated erases
+  await swapImageSource(obj, native.toDataURL('image/png'));
 }
 
 function clearMask() {
@@ -141,7 +180,7 @@ function wirePainting() {
     const ctx = maskC.getContext('2d');
     ctx.globalCompositeOperation = mode === 'erase' ? 'destination-out' : 'source-over';
     ctx.strokeStyle = 'rgb(204,51,51)';
-    ctx.lineWidth = Math.max(1, brush / fitScale);
+    ctx.lineWidth = brushImagePx();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
@@ -204,8 +243,13 @@ async function run() {
   if (!box) { showToast('paint over something first'); return; }
 
   busy = true;
+  ed.busy = true;            // undo/redo stand down until this finishes
   $('#rtGo').disabled = true;
+  $('#rtUndo').disabled = true;
   $('#rtHint').textContent = 'erasing…';
+  const target = obj;
+  const before = native.getContext('2d', { willReadFrequently: true })
+    .getImageData(0, 0, native.width, native.height);
 
   try {
     await ensureWorker();
@@ -225,27 +269,39 @@ async function run() {
         [image.data.buffer, mask.data.buffer]);
     });
 
+    // If the document was rewound while the worker was busy, the layer we
+    // started from is detached: writing to it silently did nothing while the
+    // UI said "erased", and the export still contained the object.
+    if (obj !== target || !ed.canvas.getObjects().includes(target)) {
+      throw new Error('the flyer changed while that ran — nothing was erased');
+    }
+
     native.getContext('2d').putImageData(patch, box.x, box.y);
     $('#rtImg').getContext('2d').drawImage(native, 0, 0);
+    pixelHistory.push(before);
+    if (pixelHistory.length > 8) pixelHistory.shift();
     history = [];
     clearMask();
 
-    const png = obj.srcFormat === 'png';
-    const url = png ? native.toDataURL('image/png') : native.toDataURL('image/jpeg', 0.92);
-    await swapImageSource(obj, url);
+    await pushToLayer();
     $('#rtHint').textContent = 'gone. paint over anything else you want removed.';
     showToast('erased');
   } catch (err) {
     $('#rtHint').textContent = HINT;
-    showToast('erase failed: ' + (err.message || err));
+    showToast(err.message || String(err));
   }
 
   $('#rtGo').disabled = false;
+  $('#rtUndo').disabled = false;
   busy = false;
+  ed.busy = false;
 }
 
 function close() {
   $('#retouch').classList.remove('on');
-  obj = null; native = null; maskC = null; history = [];
+  obj = null; native = null; maskC = null;
+  history = []; pixelHistory = [];
+  busy = false;
+  ed.busy = false;
   emit('retouch:closed');
 }

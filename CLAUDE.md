@@ -11,7 +11,7 @@ A flyer editor for the browser: upload photos, scrub out unwanted objects, set t
 
 - Vanilla JS with native ES modules. Zero build step. No frameworks, bundlers, preprocessors, or TypeScript.
 - Deploys as a static GitHub Pages **project site** (served under `/repo-name/`): every path must be relative (`./js/app.js`, never `/js/app.js`).
-- Dependencies, all pinned-version CDN imports, and only these: `fabric` v6 (ESM) and `idb-keyval` (ESM). Anything else: ask first. (Object removal used to pull `opencv.js`; Telea inpainting is now implemented directly in `js/inpaint-worker.js`, so there is no third dependency — see `docs/ui-revision.md` §2.)
+- Dependencies, pinned, and only these: `fabric` v6 (ESM) and `idb-keyval` (ESM). Anything else: ask first. Both are **vendored in `vendor/`** rather than loaded from a CDN — offline was broken while they came over the network, and the test shim for them hid a whole class of bug. See `vendor/README.md`. Object removal used to pull `opencv.js`; Telea inpainting is implemented directly in `js/inpaint-worker.js`, so there is no third dependency — see `docs/ui-revision.md` §2.
 - All UI type is DM Mono. Chrome is strictly monochrome per the token table in doc §2 — the flyer being edited is the only color on screen. Selection UI is ink, not blue.
 - Touch targets ≥ 44px. `prefers-reduced-motion` respected.
 
@@ -26,9 +26,21 @@ js/editor.js          fabric canvas, gestures, undo, autosave, export
 js/retouch.js         erase-object mode
 js/inpaint-worker.js  telea inpainting, no dependencies
 js/fonts.js  js/store.js  js/bus.js
+vendor/               fabric + idb-keyval, pinned, served from the repo
 fonts.json            ← already written, see below
 sw.js
+tests/                npm test — see TESTING.md
 ```
+
+## Testing is not optional here
+
+This app has repeatedly shipped visibly broken features past a green suite: an
+export cropped to a corner (every assertion checked dimensions, never a pixel), a
+controls panel invisible behind a scrim (tests called functions instead of
+tapping), an offline mode that produced a dead shell (the assertion counted a
+static DOM node). **Assert the outcome a person cares about, not the mechanism.**
+`docs/qa-charter.md` briefs independent reviewers; `docs/ui-revision.md` records
+what they found.
 
 ## fonts.json
 

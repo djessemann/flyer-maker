@@ -1,5 +1,5 @@
 // IndexedDB persistence via idb-keyval: project metas, full docs, app settings
-import { createStore, get, set, del } from 'https://cdn.jsdelivr.net/npm/idb-keyval@6.3.0/+esm';
+import { createStore, get, set, del } from '../vendor/idb-keyval-6.3.0.mjs';
 
 const kv = createStore('pasteup', 'kv');
 
